@@ -39,7 +39,7 @@ module.exports = {
   // entorno). Pueden tener de 4 a 8 números; mientras más largos, mejor: 6 es buen punto.
   cuentas: [
     { id: 'uno', nombre: 'Gabri',   pin: process.env.PIN_UNO || '123456', color: '#ff6f91', carita: 'gato' },
-    { id: 'dos', nombre: 'Mi amor', pin: process.env.PIN_DOS || '654321', color: '#8fc4ff', carita: 'conejo' },
+    { id: 'dos', nombre: 'Eli', pin: process.env.PIN_DOS || '654321', color: '#8fc4ff', carita: 'conejo' },
   ],
 
   pinesDeEjemplo: ['123456', '654321'],
