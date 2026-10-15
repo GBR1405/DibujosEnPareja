@@ -24,6 +24,7 @@ const TRAZOS = {
   retroceso: '<path d="M12 7h12a2.5 2.5 0 0 1 2.5 2.5v13A2.5 2.5 0 0 1 24 25H12L5.5 16z"/><path d="M15.5 12l7 8M22.5 12l-7 8"/>',
   contorno: '<path d="M16 6l11 19.5H5z"/>',
   relleno: '<path d="M16 6l11 19.5H5z" fill="currentColor"/>',
+  campana: '<path d="M8.5 22.5V15a7.5 7.5 0 0 1 15 0v7.5l2.2 2.7H6.3z"/><path d="M13.3 27.5a2.9 2.9 0 0 0 5.4 0"/><path d="M16 5V7.5"/>',
 };
 
 export function icono(nombre, { relleno = false, titulo = '' } = {}) {

@@ -357,6 +357,28 @@ img { display: block; max-width: 100%; }
 .revelado-titulo { margin: 0 0 .3rem; font-family: var(--display); font-size: 1.65rem; font-weight: 400; line-height: 1.15; }
 .revelado-texto { margin: 0 0 .6rem; color: var(--tinta-2); }
 
+/* El cuadrito de "Activar avisos". */
+.control-avisos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin: 2rem 4px 0;
+  padding: .7rem .9rem;
+  border: 2px dashed var(--tinta);
+  border-radius: 18px;
+  background: var(--papel);
+  font-size: .92rem;
+  transform: rotate(.6deg);
+}
+.control-avisos[hidden] { display: none; }
+.control-avisos.activo { border-style: solid; background: #d5f5ea; }
+.control-avisos.suave { background: var(--cielo); }
+.control-avisos .cara { width: 40px; height: 40px; }
+.control-avisos-texto { flex: 1 1 12em; margin: 0; }
+.control-avisos .boton { flex: none; margin-left: auto; }
+.control-avisos .boton .icono { width: 1.1em; height: 1.1em; }
+
 .aviso-anio {
   display: block;
   margin-top: 2rem;

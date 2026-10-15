@@ -2,6 +2,7 @@ import { api, urlDibujo } from './api.js';
 import { h, aviso, hoja, confirmar, lluviaDeCorazones } from './ui.js';
 import { icono, carita } from './iconos.js';
 import { crearLienzo } from './lienzo.js';
+import { controlAvisos, sincronizarAvisos, salirConAvisos } from './avisos.js';
 
 const raiz = document.getElementById('app');
 let sesion = null; // { yo, pareja }
@@ -165,7 +166,7 @@ function botonPerfil() {
         {
           texto: 'Salir',
           clase: 'fresa',
-          onClick: async () => { await api.salir().catch(() => {}); sesion = null; navegar('entrar'); },
+          onClick: async () => { await salirConAvisos(); sesion = null; navegar('entrar'); },
         },
       ],
     }),
@@ -266,6 +267,7 @@ async function pantallaHoy(cont, vigente) {
   const claveReveal = () => `garabatos-reveal-${sesion.yo.id}-${datos.fecha}`;
   const yaVisto = () => { try { return localStorage.getItem(claveReveal()) === '1'; } catch { return false; } };
   const marcarVisto = () => { try { localStorage.setItem(claveReveal(), '1'); } catch { /* sin almacenamiento */ } };
+  const avisos = controlAvisos(sesion);
 
   const quien = (cuenta, listo) => h('li', { class: `quien ${listo ? 'listo' : ''}` },
     caritaDe(cuenta, 'chica', !listo),
@@ -299,6 +301,8 @@ async function pantallaHoy(cont, vigente) {
       }
     }
 
+    hijos.push(avisos.el);
+
     if (diasParaReinicio <= 30) {
       hijos.push(h('a', { href: '#/calendario', class: 'aviso-anio' },
         diasParaReinicio === 0
@@ -327,7 +331,7 @@ async function pantallaHoy(cont, vigente) {
   const cada = setInterval(() => {
     if (!document.hidden && datos.yoListo && !datos.parejaV) refrescar();
   }, 12000);
-  const alVolver = () => { if (!document.hidden) refrescar(); };
+  const alVolver = () => { if (!document.hidden) { refrescar(); avisos.actualizar(); } };
   document.addEventListener('visibilitychange', alVolver);
   return () => { clearInterval(cada); document.removeEventListener('visibilitychange', alVolver); };
 }
@@ -723,6 +727,7 @@ async function ir() {
       return;
     }
     if (ruta === 'entrar') { location.replace('#/hoy'); return; }
+    sincronizarAvisos(sesion.yo);
 
     const pantallas = { hoy: pantallaHoy, dibujar: pantallaDibujar, calendario: pantallaCalendario };
     const construir = pantallas[ruta];

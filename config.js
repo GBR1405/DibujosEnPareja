@@ -27,6 +27,19 @@ module.exports = {
   // cualquier texto largo y secreto, por ejemplo el resultado de `openssl rand -hex 32`.
   secreto: process.env.SECRETO || '',
 
+  // Avisos al teléfono (notificaciones push). Sin estas tres variables la app funciona
+  // igual, solo que sin avisos. Se generan con `npx web-push generate-vapid-keys`.
+  // `contacto` es un correo con el formato mailto:tu@correo.com (lo piden Apple y Google).
+  avisos: {
+    clavePublica: process.env.VAPID_PUBLIC_KEY || '',
+    clavePrivada: process.env.VAPID_PRIVATE_KEY || '',
+    contacto: process.env.VAPID_SUBJECT || '',
+  },
+
+  // Contraseña que manda cron-job.org para disparar el recordatorio del mediodía
+  // (cabecera Authorization: Bearer <CRON_SECRET>). Sin ella, el recordatorio no funciona.
+  cronSecreto: process.env.CRON_SECRET || '',
+
   // Al empezar un año nuevo se borran todos los dibujos del año anterior.
   // Ponlo en false si prefieren que se queden guardados en la base de datos.
   borrarAlEmpezarAnio: true,

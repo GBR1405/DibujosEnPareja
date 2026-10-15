@@ -5,7 +5,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const assert = require('assert');
+const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 const sharp = require('sharp');
+const webpush = require('web-push');
 
 const carpeta = fs.mkdtempSync(path.join(os.tmpdir(), 'garabatos-'));
 process.env.TURSO_DATABASE_URL = `file:${path.join(carpeta, 'prueba.db')}`;
@@ -13,6 +16,13 @@ delete process.env.TURSO_AUTH_TOKEN;
 process.env.SECRETO = 'secreto-de-prueba-secreto-de-prueba';
 process.env.PIN_UNO = '111111';
 process.env.PIN_DOS = '222222';
+// Claves VAPID de verdad (se generan sin internet). Los avisos NO salen a internet:
+// más abajo se cambia el envío por uno falso que solo los apunta.
+const vapid = webpush.generateVAPIDKeys();
+process.env.VAPID_PUBLIC_KEY = vapid.publicKey;
+process.env.VAPID_PRIVATE_KEY = vapid.privateKey;
+process.env.VAPID_SUBJECT = 'mailto:pruebas@garabatos.test';
+process.env.CRON_SECRET = 'cron-de-prueba-cron-de-prueba';
 
 const server = require('../server');
 const { base } = server;
@@ -34,14 +44,41 @@ async function dibujo({ ancho = 720, alto = 960, formato = 'png', color = '#ff8a
   return `data:image/${formato};base64,${buf.toString('base64')}`;
 }
 
+// Envío de avisos falso: apunta cada intento y hace lo que diga `fallo` (nada, lanzar
+// un error, o quedarse colgado).
+const intentos = [];
+let fallo = () => {};
+server.avisos.usarEnviador(async (aparato, carga, opciones) => {
+  intentos.push({ endpoint: aparato.endpoint, ...JSON.parse(carga), opciones });
+  await fallo(aparato);
+});
+const EP = (nombre) => `https://push.ejemplo.com/${nombre}`;
+const aparato = (nombre) => ({
+  endpoint: EP(nombre),
+  expirationTime: null,
+  keys: { p256dh: crypto.randomBytes(65).toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') },
+});
+const endpointsDe = async (quien) => (await base.aparatosDe(quien)).map((a) => a.endpoint).sort();
+
+// Corre scripts/probar-sin-avisos.js en otro proceso, con otras variables de entorno.
+function servidorAparte(env) {
+  const db = path.join(carpeta, `aparte-${crypto.randomBytes(4).toString('hex')}.db`);
+  const salida = execFileSync(process.execPath, [path.join(__dirname, 'probar-sin-avisos.js')], {
+    env: { ...process.env, VAPID_PUBLIC_KEY: '', VAPID_PRIVATE_KEY: '', VAPID_SUBJECT: '', TURSO_DATABASE_URL: `file:${db}`, ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+  });
+  return JSON.parse(salida.trim().split('\n').pop());
+}
+
 (async () => {
   const servidor = server.app.listen(0);
   const raiz = `http://127.0.0.1:${servidor.address().port}`;
 
-  async function pedir(metodo, ruta, { cookie, cuerpo } = {}) {
+  async function pedir(metodo, ruta, { cookie, cuerpo, cabeceras } = {}) {
     const r = await fetch(raiz + ruta, {
       method: metodo,
-      headers: { ...(cookie ? { Cookie: cookie } : {}), ...(cuerpo ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { ...(cookie ? { Cookie: cookie } : {}), ...(cuerpo ? { 'Content-Type': 'application/json' } : {}), ...cabeceras },
       body: cuerpo ? JSON.stringify(cuerpo) : undefined,
     });
     const tipo = r.headers.get('content-type') || '';
@@ -82,7 +119,43 @@ async function dibujo({ ancho = 720, alto = 960, formato = 'png', color = '#ff8a
     assert.equal(unAnio.size, 200); paso('200 días seguidos sin repetir tema');
     assert.deepEqual([hA.yoListo, hA.parejaListo, hA.racha], [false, false, 0]);
 
+    console.log('Avisos: activar y desactivar');
+    assert.equal((await pedir('GET', '/api/avisos/clave')).estado, 401);
+    assert.equal((await pedir('GET', '/api/avisos/clave', { cookie: A.cookie })).datos.clave, vapid.publicKey); paso('la clave pública se entrega solo con sesión');
+    assert.equal((await pedir('POST', '/api/avisos/activar', { cuerpo: aparato('x') })).estado, 401);
+    const malos = [
+      {},
+      { ...aparato('x'), endpoint: 'http://push.ejemplo.com/sin-https' },
+      { ...aparato('x'), endpoint: 'esto no es una dirección' },
+      { endpoint: EP('x') },
+      { endpoint: EP('x'), keys: { p256dh: aparato('x').keys.p256dh } },
+      { endpoint: EP('x'), keys: { auth: aparato('x').keys.auth } },
+      { endpoint: EP('x'), keys: { p256dh: '<script>', auth: 'abc' } },
+    ];
+    for (const malo of malos) {
+      assert.equal((await pedir('POST', '/api/avisos/activar', { cookie: A.cookie, cuerpo: malo })).estado, 400, JSON.stringify(malo));
+    }
+    paso('activar exige https y las claves p256dh y auth');
+    for (const [cookie, nombre] of [[A.cookie, 'uno-telefono'], [A.cookie, 'uno-ipad'], [B.cookie, 'dos-telefono'], [A.cookie, 'compartido']]) {
+      assert.equal((await pedir('POST', '/api/avisos/activar', { cookie, cuerpo: aparato(nombre) })).estado, 200);
+    }
+    assert.deepEqual(await endpointsDe('uno'), [EP('compartido'), EP('uno-ipad'), EP('uno-telefono')]); paso('una persona puede tener varios aparatos');
+    await pedir('POST', '/api/avisos/activar', { cookie: B.cookie, cuerpo: aparato('compartido') });
+    assert.deepEqual(await endpointsDe('uno'), [EP('uno-ipad'), EP('uno-telefono')]);
+    assert.deepEqual(await endpointsDe('dos'), [EP('compartido'), EP('dos-telefono')]); paso('si el mismo aparato entra con la otra cuenta, se pasa a esa cuenta (no se duplica)');
+    await pedir('POST', '/api/avisos/desactivar', { cookie: A.cookie, cuerpo: { endpoint: EP('compartido') } });
+    assert.ok((await endpointsDe('dos')).includes(EP('compartido')), 'A no debe poder borrar el aparato de B');
+    await pedir('POST', '/api/avisos/desactivar', { cookie: B.cookie, cuerpo: { endpoint: EP('compartido') } });
+    assert.deepEqual(await endpointsDe('dos'), [EP('dos-telefono')]); paso('desactivar borra solo el aparato propio');
+    const otraVez = await entrar('uno', '111111');
+    await pedir('POST', '/api/avisos/activar', { cookie: otraVez.cookie, cuerpo: aparato('uno-prestado') });
+    const salida = await pedir('POST', '/api/salir', { cookie: otraVez.cookie, cuerpo: { endpoint: EP('uno-prestado') } });
+    assert.equal(salida.estado, 200);
+    assert.deepEqual(await endpointsDe('uno'), [EP('uno-ipad'), EP('uno-telefono')]); paso('al cerrar sesión, ese aparato deja de recibir avisos');
+    assert.equal((await pedir('POST', '/api/salir')).estado, 200);
+
     console.log('Terminar un dibujo');
+    intentos.length = 0;
     const png = await dibujo();
     assert.equal((await pedir('POST', '/api/terminar', { cookie: A.cookie, cuerpo: { fecha: hoy, imagen: 'data:image/png;base64,AAAA' } })).estado, 400); paso('una imagen falsa se rechaza');
     const mentirosa = `data:image/png;base64,${Buffer.from('esto no es una imagen').toString('base64')}`;
@@ -101,6 +174,9 @@ async function dibujo({ ancho = 720, alto = 960, formato = 'png', color = '#ff8a
     ]);
     assert.deepEqual([r1.estado, r2.estado].sort(), [200, 409]); paso('dos envíos a la vez: uno se guarda y el otro se rechaza');
     assert.equal(await base.contar(), 1);
+    const [gabri, eli] = config.cuentas.map((c) => c.nombre);
+    assert.deepEqual(intentos.map((i) => i.endpoint).sort(), [EP('uno-ipad'), EP('uno-telefono')]); paso('los envíos rechazados no avisan; el que se guardó avisa una sola vez, a todos los aparatos de la pareja');
+    assert.ok(intentos.every((i) => i.titulo === `${eli} ya dibujó, ¡te toca! 🎨` && i.tag === 'pareja'), intentos[0]?.titulo); paso(`si la pareja no ha dibujado: "${intentos[0].titulo}"`);
 
     console.log('Quién ve qué');
     const antesA = (await pedir('GET', '/api/hoy', { cookie: A.cookie })).datos;
@@ -110,11 +186,38 @@ async function dibujo({ ancho = 720, alto = 960, formato = 'png', color = '#ff8a
     const mesAntes = (await pedir('GET', `/api/mes/${hoy.slice(0, 7)}`, { cookie: A.cookie })).datos.dias.find((d) => d.fecha === hoy);
     assert.deepEqual([mesAntes.yo, mesAntes.pareja.visible, mesAntes.pareja.mini], [null, false, null]); paso('ni el calendario lo filtra');
 
+    console.log('Recordatorio del mediodía');
+    const cron = (cabeceras, metodo = 'GET') => pedir(metodo, '/api/cron/recordatorio', { cabeceras });
+    const conClave = { Authorization: `Bearer ${process.env.CRON_SECRET}` };
+    config.cronSecreto = '';
+    assert.equal((await cron(conClave)).estado, 503);
+    config.cronSecreto = process.env.CRON_SECRET; paso('sin CRON_SECRET configurada responde 503 y no hace nada');
+    assert.equal((await cron()).estado, 401);
+    assert.equal((await cron({ Authorization: 'Bearer otra-clave' })).estado, 401);
+    assert.equal((await cron({ Authorization: process.env.CRON_SECRET })).estado, 401);
+    assert.equal((await cron({ Authorization: `Bearer ${process.env.CRON_SECRET}x` }, 'POST')).estado, 401); paso('sin la contraseña correcta: 401');
+    assert.equal(intentos.length, 2, 'nada de eso debió mandar avisos');
+    intentos.length = 0;
+    fallo = (a) => { if (a.endpoint === EP('uno-ipad')) throw Object.assign(new Error('Gone'), { statusCode: 410 }); };
+    const rec = await cron(conClave, 'POST');
+    assert.equal(rec.estado, 200);
+    assert.deepEqual(intentos.map((i) => i.endpoint).sort(), [EP('uno-ipad'), EP('uno-telefono')]);
+    assert.equal(intentos[0].titulo, `Hoy toca dibujar: ${temaDelDia(hoy)}. ¿Te animas? ✏️`);
+    assert.deepEqual([rec.datos.enviados, rec.datos.avisados], [1, [gabri]]); paso(`solo se le recuerda a quien no ha dibujado (${gabri}): "${intentos[0].titulo}"`);
+    assert.deepEqual(await endpointsDe('uno'), [EP('uno-telefono')]); paso('si el servicio dice que el aparato ya no existe (410), se borra');
+    fallo = () => {};
+    intentos.length = 0;
+    const rec2 = await cron(conClave);
+    assert.deepEqual([rec2.estado, rec2.datos.enviados, intentos.length], [200, 0, 0]); paso('si el cron corre dos veces el mismo día, no repite avisos');
+
+    intentos.length = 0;
     const t = await pedir('POST', '/api/terminar', { cookie: A.cookie, cuerpo: { fecha: hoy, imagen: png } });
     assert.equal(t.estado, 200);
     assert.ok(t.datos.bytes < 40 * 1024, `pesa ${t.datos.bytes}`); paso(`A termina: su dibujo quedó en ${(t.datos.bytes / 1024).toFixed(1)} KB`);
     assert.equal((await pedir('GET', '/api/hoy', { cookie: B.cookie })).datos.parejaV !== null, true);
+    assert.deepEqual(intentos.map((i) => [i.endpoint, i.titulo]), [[EP('dos-telefono'), `Ya puedes ver el dibujo de ${gabri} 💛`]]); paso(`si la pareja ya dibujó: "${intentos[0].titulo}"`);
     assert.equal((await pedir('POST', '/api/terminar', { cookie: A.cookie, cuerpo: { fecha: hoy, imagen: png } })).estado, 409); paso('terminar es definitivo (no se puede volver a guardar)');
+    assert.equal(intentos.length, 1); paso('un reintento rechazado (409) no vuelve a avisar');
 
     const ahora = (await pedir('GET', '/api/hoy', { cookie: A.cookie })).datos;
     assert.ok(ahora.yoListo && ahora.parejaListo && ahora.parejaV && ahora.racha === 1); paso('al terminar los dos: se ven, y la racha es 1');
@@ -137,7 +240,12 @@ async function dibujo({ ancho = 720, alto = 960, formato = 'png', color = '#ff8a
     const mes = (await pedir('GET', `/api/mes/${hoy.slice(0, 7)}`, { cookie: A.cookie })).datos;
     const dHoy = mes.dias.find((d) => d.fecha === hoy);
     assert.ok(dHoy.yo.mini.startsWith('data:image/webp;base64,') && dHoy.pareja.visible && dHoy.pareja.mini); paso('el mes trae los dos dibujos de hoy, con miniaturas');
-    assert.equal(mes.dias.find((d) => d.fecha === ayer).pareja.visible, true);
+    // El día 1, "ayer" cae en el mes anterior; el 1 de enero, en el año anterior (que el
+    // calendario ya no muestra).
+    if (F.anioDe(ayer) === F.anioDe(hoy)) {
+      const mesDeAyer = ayer.slice(0, 7) === hoy.slice(0, 7) ? mes : (await pedir('GET', `/api/mes/${ayer.slice(0, 7)}`, { cookie: A.cookie })).datos;
+      assert.equal(mesDeAyer.dias.find((d) => d.fecha === ayer).pareja.visible, true);
+    }
     assert.ok(mes.dias.every((d) => d.futuro ? d.tema === null : typeof d.tema === 'string')); paso('los días futuros no muestran tema');
     assert.ok(JSON.stringify(mes).length < 400_000); paso(`un mes entero pesa ${(JSON.stringify(mes).length / 1024).toFixed(0)} KB`);
     assert.equal((await pedir('GET', '/api/mes/2019-05', { cookie: A.cookie })).estado, 400);
@@ -149,8 +257,36 @@ async function dibujo({ ancho = 720, alto = 960, formato = 'png', color = '#ff8a
     const antes = await base.contar();
     server.reiniciarRevisionDeAnio();
     await pedir('GET', '/api/yo', { cookie: A.cookie });
-    assert.equal(await base.contar(), antes - 2); paso('al empezar el año se borra lo del año anterior…');
+    // El 1 de enero, el dibujo de "ayer" también es del año anterior y se borra.
+    const delAnioPasado = F.anioDe(ayer) < F.anioDe(hoy) ? 3 : 2;
+    assert.equal(await base.contar(), antes - delAnioPasado); paso('al empezar el año se borra lo del año anterior…');
     assert.equal((await pedir('GET', `/api/dibujo/${hoy}/uno`, { cookie: A.cookie })).estado, 200); paso('…y lo de este año se queda');
+
+    console.log('Avisos: cuando algo sale mal');
+    if (F.anioDe(ayer) === F.anioDe(hoy)) {
+      intentos.length = 0;
+      assert.equal((await pedir('POST', '/api/terminar', { cookie: A.cookie, cuerpo: { fecha: ayer, imagen: png } })).estado, 200);
+      assert.equal(intentos.length, 0); paso('terminar el dibujo de ayer no avisa a nadie');
+    }
+    await base.borrarDibujo({ fecha: hoy, quien: 'uno' });
+    fallo = () => { throw new Error('el servicio de avisos se cayó'); };
+    const conError = await pedir('POST', '/api/terminar', { cookie: A.cookie, cuerpo: { fecha: hoy, imagen: png } });
+    assert.deepEqual([conError.estado, conError.datos.ok], [200, true]); paso('si el aviso falla, el dibujo igual se guarda');
+    await base.borrarDibujo({ fecha: hoy, quien: 'uno' });
+    fallo = () => new Promise(() => {}); // nunca responde
+    const inicio = Date.now();
+    const colgado = await pedir('POST', '/api/terminar', { cookie: A.cookie, cuerpo: { fecha: hoy, imagen: png } });
+    const tardo = Date.now() - inicio;
+    assert.equal(colgado.estado, 200);
+    assert.ok(tardo < 4500, `tardó ${tardo} ms`); paso(`si el aviso se queda colgado, se responde igual (en ${(tardo / 1000).toFixed(1)} s)`);
+    fallo = () => {};
+
+    console.log('Sin claves VAPID');
+    const sinClaves = servidorAparte({});
+    assert.deepEqual([sinClaves.clave, sinClaves.activar, sinClaves.terminar, sinClaves.cron], [null, 503, 200, 200]);
+    assert.equal(sinClaves.cronDatos.enviados, 0); paso('sin VAPID la app arranca y funciona, solo que sin avisos');
+    const clavesMalas = servidorAparte({ VAPID_PUBLIC_KEY: 'no-es-una-clave', VAPID_PRIVATE_KEY: 'tampoco', VAPID_SUBJECT: 'mailto:a@b.test' });
+    assert.deepEqual([clavesMalas.clave, clavesMalas.terminar], [null, 200]); paso('con claves VAPID mal copiadas tampoco se cae');
 
     console.log('Protección de PIN');
     for (let i = 0; i < 5; i += 1) await entrar('dos', '000000');

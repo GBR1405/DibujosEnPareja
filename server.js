@@ -6,6 +6,7 @@ const config = require('./config');
 const { abrir } = require('./lib/base');
 const { comprimir } = require('./lib/imagen');
 const { temaDelDia } = require('./lib/tema-del-dia');
+const { crearAvisos } = require('./lib/avisos');
 const F = require('./lib/fecha');
 
 // ---------------------------------------------------------------- arranque
@@ -15,6 +16,7 @@ const parejaDe = (id) => cuentas.find((c) => c.id !== id).id;
 const hoy = () => F.claveDeHoy(config.zonaHoraria);
 
 const base = abrir(config.turso);
+const avisos = crearAvisos({ base, claves: config.avisos });
 
 for (const c of cuentas) {
   if (!/^\d{4,8}$/.test(c.pin)) throw new Error(`El PIN de ${c.nombre} debe tener de 4 a 8 números.`);
@@ -102,10 +104,42 @@ function falloDePin(ip) {
   intentos.set(ip, e);
   if (intentos.size > 500) intentos.delete(intentos.keys().next().value);
 }
-const pinCorrecto = (dado, real) => {
+// Compara dos textos tardando siempre lo mismo (no da pistas de cuánto se acertó).
+const iguales = (dado, real) => {
   const h = (t) => crypto.createHash('sha256').update(String(t)).digest();
   return crypto.timingSafeEqual(h(dado), h(real));
 };
+const pinCorrecto = iguales;
+
+// ---------------------------------------------------------------- avisos
+const HORAS = 3600;
+
+// Valida lo que manda el navegador al activar avisos (PushSubscription.toJSON()).
+function leerAparato(cuerpo) {
+  const { endpoint, keys } = cuerpo || {};
+  if (typeof endpoint !== 'string' || endpoint.length > 2000) return null;
+  let url;
+  try { url = new URL(endpoint); } catch { return null; }
+  if (url.protocol !== 'https:') return null;
+  const clave = (t, max) => typeof t === 'string' && t.length <= max && /^[A-Za-z0-9_+/-]+={0,2}$/.test(t);
+  if (!keys || !clave(keys.p256dh, 200) || !clave(keys.auth, 100)) return null;
+  return { endpoint, p256dh: keys.p256dh, auth: keys.auth };
+}
+
+// Cuando alguien termina el dibujo de hoy, se le avisa a la otra persona.
+function avisarALaPareja(yo, fecha) {
+  const otra = parejaDe(yo);
+  const nombre = porId.get(yo).nombre;
+  return avisos.avisar(async () => {
+    const yaDibujo = (await base.terminaronEl(fecha)).includes(otra);
+    return [{
+      quien: otra,
+      mensaje: yaDibujo
+        ? { titulo: `Ya puedes ver el dibujo de ${nombre} 💛`, texto: 'Ábrelo en Garabatos.', tag: 'pareja', ttl: 6 * HORAS }
+        : { titulo: `${nombre} ya dibujó, ¡te toca! 🎨`, texto: `Hoy toca dibujar: ${temaDelDia(fecha)}.`, tag: 'pareja', ttl: 6 * HORAS },
+    }];
+  });
+}
 
 // ---------------------------------------------------------------- servidor
 const app = express();
@@ -123,6 +157,33 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// Recordatorio del mediodía. Lo llama cron-job.org todos los días a las 12:00 (hora de
+// Costa Rica) con la cabecera Authorization: Bearer <CRON_SECRET>. Va antes que todo lo
+// demás para que, sin la contraseña correcta, no se ejecute nada.
+async function recordatorio(req, res) {
+  const secreto = config.cronSecreto;
+  if (!secreto) return res.status(503).json({ error: 'falta_CRON_SECRET' });
+  if (!iguales(req.get('authorization') || '', `Bearer ${secreto}`)) return res.status(401).json({ error: 'no_autorizado' });
+
+  const fecha = await mantenimiento();
+  if (!avisos.disponible) return res.json({ ok: true, fecha, enviados: 0, nota: 'avisos_desactivados' });
+
+  // Si el cron se ejecuta dos veces el mismo día, la segunda no manda nada.
+  if (!(await base.marcarRecordatorio(fecha, F.sumarDias(fecha, -7)))) {
+    return res.json({ ok: true, fecha, enviados: 0, nota: 'ya_se_mando_hoy' });
+  }
+  const terminaron = await base.terminaronEl(fecha);
+  const faltan = cuentas.filter((c) => !terminaron.includes(c.id));
+  const tema = temaDelDia(fecha);
+  const { enviados } = await avisos.avisar(faltan.map((c) => ({
+    quien: c.id,
+    mensaje: { titulo: `Hoy toca dibujar: ${tema}. ¿Te animas? ✏️`, texto: `Un ratito para dibujar con ${porId.get(parejaDe(c.id)).nombre}.`, tag: 'recordatorio', ttl: 12 * HORAS },
+  })), { tope: 5000 });
+  return res.json({ ok: true, fecha, enviados, avisados: faltan.map((c) => c.nombre) });
+}
+app.get('/api/cron/recordatorio', recordatorio);
+app.post('/api/cron/recordatorio', recordatorio);
 
 app.use('/api', async (req, res, next) => {
   req.hoy = await mantenimiento();
@@ -159,7 +220,14 @@ app.post('/api/entrar', async (req, res) => {
   return res.json({ ok: true });
 });
 
-app.post('/api/salir', (req, res) => {
+// Al salir, la app manda el endpoint de este aparato (si tenía avisos) para que deje de
+// recibir los avisos de esta cuenta. El endpoint es una dirección larga e imposible de
+// adivinar que solo conoce el propio aparato, así que basta con él para borrarlo.
+app.post('/api/salir', async (req, res) => {
+  const endpoint = req.body?.endpoint;
+  if (typeof endpoint === 'string' && endpoint.length <= 2000) {
+    await base.borrarAparato(endpoint).catch((err) => console.warn('No se pudo borrar el aparato al salir:', err.message));
+  }
   res.clearCookie(COOKIE, { path: '/' });
   res.json({ ok: true });
 });
@@ -214,7 +282,30 @@ app.post('/api/terminar', async (req, res) => {
 
   const guardado = await base.guardar({ fecha, quien: req.yo, imagen: listo.imagen, mini: listo.mini });
   if (!guardado) return res.status(409).json({ error: 'ya_terminado' });
+  // Solo el dibujo de hoy avisa (terminar el de ayer a medianoche no). Tarda como mucho
+  // ~3 s y nunca falla: si el aviso no sale, el dibujo igual quedó guardado.
+  if (fecha === req.hoy) await avisarALaPareja(req.yo, fecha);
   return res.json({ ok: true, bytes: listo.imagen.length });
+});
+
+// ---- avisos al teléfono
+app.get('/api/avisos/clave', (req, res) => {
+  res.json({ clave: avisos.clavePublica });
+});
+
+app.post('/api/avisos/activar', async (req, res) => {
+  if (!avisos.disponible) return res.status(503).json({ error: 'avisos_no_disponibles' });
+  const aparato = leerAparato(req.body);
+  if (!aparato) return res.status(400).json({ error: 'aparato_invalido' });
+  await base.guardarAparato({ ...aparato, quien: req.yo });
+  return res.json({ ok: true });
+});
+
+app.post('/api/avisos/desactivar', async (req, res) => {
+  const endpoint = req.body?.endpoint;
+  if (typeof endpoint !== 'string' || endpoint.length > 2000) return res.status(400).json({ error: 'aparato_invalido' });
+  await base.borrarAparato(endpoint, req.yo);
+  return res.json({ ok: true });
 });
 
 // Imagen de un día. ?mini=1 devuelve la miniatura. Se guarda en la caché del navegador
@@ -271,6 +362,8 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'no_existe' }));
 // ---------------------------------------------------------------- archivos
 // En tu computadora los sirve Express; en Vercel los sirve su CDN desde public/.
 app.use(express.static(path.join(__dirname, 'public'), {
+  // sw.js (el que muestra los avisos) va siempre con no-cache, para que el navegador
+  // revise si cambió cada vez que se abre la app.
   setHeaders(res, archivo) {
     res.set('Cache-Control', archivo.endsWith('.woff2') ? 'public, max-age=31536000, immutable' : 'no-cache');
   },
@@ -299,5 +392,6 @@ if (require.main === module) {
 module.exports = app;
 module.exports.app = app;
 module.exports.base = base;
+module.exports.avisos = avisos;
 module.exports.mantenimiento = mantenimiento;
 module.exports.reiniciarRevisionDeAnio = () => { anioRevisado = null; };
