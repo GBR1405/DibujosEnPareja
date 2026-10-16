@@ -4,6 +4,12 @@ Un ratito para dibujar juntos, cada día. Web app para dos personas, pensada par
 
 Cada día aparece un tema sencillo y al azar. Cada quien dibuja en su lienzo y lo termina (ya no se puede editar). Al terminar, ves tu dibujo; cuando la otra persona también termina, aparece el suyo. Si no dibujó ese día, solo se ve una carita triste. El calendario muestra todos los días del mes: al entrar a un mes sale un papelito de "cargando" mientras bajan los dibujos.
 
+Además:
+
+- **Reacciones y notitas.** Al dibujo de tu pareja le puedes poner una reacción (❤️ 🥰 😍 😮 😂 🥺 🌟 👏) y dejarle una notita cortita (hasta 120 letras). La reacción aparece como una pegatina en la esquina de su polaroid y la notita como un globito con tu carita. Se puede cambiar o quitar cuando quieras, en Hoy o desde el calendario. Si tiene los avisos activados, le llega uno.
+- **Postal de los dos.** El botón **Postal de los dos** arma una imagen con los dos dibujos del día, como en la app: el tema en su cartelito, la fecha, las polaroids con nombre y carita, las reacciones, las notitas y "garabatos" abajo. Con **Compartir** se manda por WhatsApp o se guarda en Fotos (en iPhone, desde el menú de compartir: *Guardar imagen*); con **Guardar** se baja como archivo. Se arma en el teléfono, no se guarda en el servidor.
+- **Garabatito**, el lapicito de la casa. Vive en la pantalla de Hoy: flota, parpadea y en su globito cuenta cómo va el día ("¡Eli ya dibujó! Te está esperando 👀", "¡Eli te dejó una notita!"…). De noche se duerme. Si lo tocas, salta y dice alguna ocurrencia o un truquito de la app.
+
 ## Probarla en tu computadora
 
 ```bash
@@ -81,10 +87,11 @@ En la pantalla de **Hoy**, abajo, hay un cuadrito con la carita de tu pareja y e
 - Si dijiste que no por error, el cuadrito explica cómo arreglarlo: en iPhone, **Ajustes → Notificaciones → Garabatos**; en Android, los ajustes del sitio o de la app.
 - Al **salir** de la cuenta, ese aparato deja de recibir los avisos de esa cuenta.
 
-Hay dos tipos de aviso:
+Hay tres tipos de aviso:
 
 1. **Cuando tu pareja termina su dibujo de hoy:** "Gabri ya dibujó, ¡te toca! 🎨", o "Ya puedes ver el dibujo de Gabri 💛" si tú ya habías dibujado. Terminar el de ayer no avisa.
-2. **Recordatorio del mediodía:** a las 12:00 (hora de Costa Rica), solo a quien todavía no ha dibujado: "Hoy toca dibujar: {tema}. ¿Te animas? ✏️". Este necesita el paso 5.
+2. **Cuando tu pareja reacciona o te deja una notita:** "Gabri reaccionó 🥰 a tu dibujo de hoy" o "Gabri te dejó una notita 🥰". Quitar una reacción, o volver a poner la misma, no avisa; si la cambia varias veces seguidas, el aviso nuevo reemplaza al anterior sin volver a sonar.
+3. **Recordatorio del mediodía:** a las 12:00 (hora de Costa Rica), solo a quien todavía no ha dibujado: "Hoy toca dibujar: {tema}. ¿Te animas? ✏️". Este necesita el paso 5.
 
 ### 5. El recordatorio del mediodía (cron-job.org, gratis)
 
@@ -140,6 +147,23 @@ CREATE TABLE dibujos (
 - Son BLOB reales, no base64 (~33 % menos espacio). Un año completo ronda los 10–20 MB, muy por debajo de los 5 GB gratis de Turso.
 - Los temas no se guardan: salen de un orden al azar fijo por año (misma fecha → mismo tema, para los dos). Si editas `lib/temas.js` a mitad de año, los temas de días pasados cambian; agrégalos al final y mejor al empezar el año. Que no se repita ninguno: `npm test` lo revisa.
 
+Las reacciones y notitas van en otra tabla chiquita (se crea sola):
+
+```sql
+CREATE TABLE reacciones (
+  fecha       TEXT NOT NULL,   -- el día del dibujo
+  quien       TEXT NOT NULL,   -- de quién es el DIBUJO (la reacción la pone la otra persona)
+  reaccion    TEXT,            -- 'corazon', 'amor'… (la lista está en lib/reacciones.js)
+  comentario  TEXT,            -- la notita, hasta 120 letras
+  actualizado TEXT NOT NULL,
+  PRIMARY KEY (fecha, quien)   -- una reacción por dibujo; se puede cambiar
+);
+```
+
+- Solo se puede reaccionar a lo que uno puede ver: el dibujo de hoy de la pareja, cuando ya terminaste el tuyo, o el de un día que ya pasó.
+- Si se quitan el emoji y la notita, la fila se borra. En año nuevo se borran junto con los dibujos.
+- Para cambiar los emojis, edita `lib/reacciones.js` (la app recibe la lista del servidor). Se guarda el `id`, así que puedes cambiar el emoji o el nombre sin perder nada.
+
 Y dos tablas nuevas, muy pequeñas, para los avisos (también se crean solas):
 
 ```sql
@@ -181,10 +205,14 @@ vercel.json          cabeceras de seguridad y caché
 lib/base.js          las tablas y las consultas
 lib/imagen.js        compresión con sharp
 lib/avisos.js        mandar avisos al teléfono (web-push)
+lib/reacciones.js    la lista de emojis para reaccionar
 lib/temas.js         ~200 temas · lib/tema-del-dia.js: cuál toca hoy
 public/              lo que se ve en el teléfono
 public/js/lienzo.js  el lienzo: trazos, formas, borrador, deshacer, Pencil
 public/js/avisos.js  el cuadrito de "Activar avisos"
+public/js/reacciones.js  pegatinas, notitas y el panel para reaccionar
+public/js/postal.js  arma la postal de los dos dibujos (canvas)
+public/js/mascota.js Garabatito
 public/sw.js         muestra los avisos (no guarda nada en caché)
 scripts/probar.js    pruebas del servidor
 ```

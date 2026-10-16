@@ -860,6 +860,260 @@ button.polaroid:active { transform: rotate(0deg) scale(.97); }
   .tamano { flex: 1; width: auto; height: 36px; }
 }
 
+/* ---------------------------------------------------------------- vida en Hoy */
+.tema.entra { animation: tema-cae .7s cubic-bezier(.3, 1.4, .5, 1) both; }
+.racha .icono { animation: late 1.8s ease-in-out infinite; }
+.hoy .boton.grande .icono { animation: invita 4s ease-in-out 1.5s infinite; }
+
+@keyframes tema-cae {
+  0% { opacity: 0; transform: translateY(-46px) rotate(5deg) scale(.9); }
+  100% { opacity: 1; transform: rotate(-1.3deg); }
+}
+@keyframes late {
+  0%, 55%, 100% { transform: scale(1); }
+  12% { transform: scale(1.28); }
+  26% { transform: scale(.94); }
+  40% { transform: scale(1.14); }
+}
+@keyframes invita {
+  0%, 76%, 100% { transform: rotate(0) translateY(0); }
+  82% { transform: rotate(-16deg) translateY(-2px); }
+  88% { transform: rotate(14deg) translateY(-2px); }
+  94% { transform: rotate(-6deg); }
+}
+
+/* ---------------------------------------------------------------- Garabatito */
+.mascota { display: flex; align-items: center; gap: 12px; margin: -.3rem 4px 1.2rem; }
+.mascota-boton {
+  flex: none;
+  width: 64px;
+  height: 85px;
+  padding: 0;
+  border: 0;
+  background: none;
+  transform-origin: 50% 100%;
+  animation: mascota-flota 3.4s ease-in-out infinite;
+}
+.mascota-boton.salta { animation: mascota-salta .65s cubic-bezier(.3, 1.4, .5, 1); }
+.mascota-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.mascota-globo {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: .55rem .9rem;
+  border: 2.5px solid var(--tinta);
+  border-radius: 18px;
+  background: var(--papel);
+  box-shadow: var(--sombra-chica);
+  transform-origin: 0 50%;
+}
+.mascota-globo::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -10px;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border-bottom: 2.5px solid var(--tinta);
+  border-left: 2.5px solid var(--tinta);
+  background: var(--papel);
+  transform: rotate(45deg);
+}
+.mascota-globo.habla { animation: globo-habla .4s cubic-bezier(.3, 1.5, .5, 1); }
+.mascota-texto { margin: 0; font-size: .95rem; font-weight: 600; text-wrap: pretty; }
+
+.m-ojos, .m-brazo, .m-zzz { transform-box: fill-box; }
+.m-ojos { transform-origin: center; animation: mascota-parpadea 4.8s infinite; }
+.m-brazo-der { transform-origin: 0% 85%; }
+.m-brazo-izq { transform-origin: 100% 85%; }
+.mascota-boton.salta .m-brazo-der { animation: mascota-saluda .3s ease-in-out 2 alternate; }
+.mascota-boton.salta .m-brazo-izq { animation: mascota-saluda-izq .3s ease-in-out 2 alternate; }
+.m-ojos-felices, .m-ojos-dormidos, .m-zzz { display: none; }
+.mascota[data-animo="feliz"] .m-ojos,
+.mascota[data-animo="dormido"] .m-ojos { display: none; }
+.mascota[data-animo="feliz"] .m-ojos-felices,
+.mascota[data-animo="dormido"] .m-ojos-dormidos,
+.mascota[data-animo="dormido"] .m-zzz { display: inline; }
+.mascota[data-animo="dormido"] .mascota-boton { animation-duration: 6s; }
+.m-zzz { animation: mascota-zzz 2.4s ease-in-out infinite; }
+
+@keyframes mascota-flota {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50% { transform: translateY(-7px) rotate(4deg); }
+}
+@keyframes mascota-salta {
+  0% { transform: translateY(0) scale(1, 1); }
+  18% { transform: translateY(0) scale(1.14, .84); }
+  45% { transform: translateY(-30px) scale(.9, 1.12) rotate(-8deg); }
+  70% { transform: translateY(0) scale(1.1, .9); }
+  85% { transform: translateY(-5px) scale(.97, 1.03); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+@keyframes mascota-parpadea {
+  0%, 93%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(.1); }
+}
+@keyframes mascota-saluda { to { transform: rotate(-42deg); } }
+@keyframes mascota-saluda-izq { to { transform: rotate(42deg); } }
+@keyframes mascota-zzz {
+  0%, 100% { opacity: .25; transform: translateY(2px); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+@keyframes globo-habla { from { opacity: 0; transform: scale(.8) translateX(-6px); } }
+
+/* ---------------------------------------------------------------- reacciones */
+.polaroid { position: relative; }
+.pegatina {
+  position: absolute;
+  top: -13px;
+  right: -11px;
+  display: grid;
+  place-items: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  border: 2.5px solid var(--tinta);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 2px 3px 0 rgba(58, 39, 69, .3);
+  font-size: 1.45rem;
+  line-height: 1;
+  transform: rotate(12deg);
+  pointer-events: none;
+}
+.polaroids.chicos .pegatina { width: 2.2rem; height: 2.2rem; font-size: 1.15rem; }
+.pegatina.nueva { animation: pegatina-pega .5s cubic-bezier(.3, 1.6, .5, 1) both; }
+@keyframes pegatina-pega {
+  0% { opacity: 0; transform: scale(2.3) rotate(-30deg); }
+  55% { opacity: 1; }
+  100% { opacity: 1; transform: scale(1) rotate(12deg); }
+}
+
+.burbuja { display: flex; align-items: flex-start; gap: 10px; margin: 1rem 4px 0; }
+.burbuja .cara { width: 42px; height: 42px; margin-top: 2px; }
+.burbuja-texto {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: .55rem .9rem;
+  border: 2.5px solid var(--tinta);
+  border-radius: 6px 18px 18px 18px;
+  background: var(--papel);
+  box-shadow: var(--sombra-chica);
+  font-size: .95rem;
+  animation: globo-habla .45s cubic-bezier(.3, 1.5, .5, 1) both;
+}
+.burbuja-notita { display: block; margin-top: .15rem; font-size: 1.08rem; font-weight: 600; overflow-wrap: anywhere; }
+
+.panel-reaccion {
+  margin: 1.1rem 4px 0;
+  padding: .85rem .9rem .75rem;
+  border: var(--trazo);
+  border-radius: var(--irregular);
+  background: var(--papel);
+  box-shadow: var(--sombra);
+}
+.panel-reaccion-titulo { margin: 0 0 .6rem; font-family: var(--display); font-size: 1.12rem; line-height: 1.15; text-align: center; }
+.reacciones { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+.reaccion {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-height: 40px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 14px;
+  background: var(--cielo);
+  font-size: 1.45rem;
+  line-height: 1;
+  transition: transform .12s ease, background-color .12s ease;
+}
+.reaccion-emoji { display: block; pointer-events: none; }
+.reaccion.activa { border-color: var(--tinta); background: var(--sol); box-shadow: var(--sombra-chica); transform: translateY(-2px) rotate(-6deg); }
+.reaccion:active { transform: scale(.9); }
+.reaccion.rebota .reaccion-emoji { animation: rebota .45s cubic-bezier(.3, 1.8, .5, 1); }
+@keyframes rebota {
+  0% { transform: scale(.6); }
+  60% { transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+@media (max-width: 380px) {
+  .reacciones { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .reaccion { aspect-ratio: auto; height: 46px; }
+}
+
+.notita { display: flex; gap: 8px; margin-top: .75rem; }
+.notita-entrada {
+  flex: 1;
+  min-width: 0;
+  padding: .5em .95em;
+  border: 2px solid var(--tinta);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--tinta);
+  font: inherit;
+  font-size: 16px; /* con menos, el iPhone hace zoom al escribir */
+}
+.notita-entrada::placeholder { color: var(--tinta-2); opacity: .8; }
+.notita-entrada:focus { outline: 3px solid var(--fresa-2); outline-offset: 1px; }
+.notita-enviar { flex: none; padding: .45em .85em; }
+.notita-enviar .icono { width: 1.25em; height: 1.25em; }
+.notita-estado { margin: .4rem 0 0; font-size: .86rem; font-weight: 600; color: var(--tinta-2); text-align: center; }
+.notita-estado:empty { display: none; }
+
+.postal-boton { display: flex; margin: 1.3rem auto 0; }
+
+.hoja .panel-reaccion { border-width: 2px; background: var(--cielo); box-shadow: none; }
+.hoja .burbuja-texto { box-shadow: none; }
+.hoja .postal-boton { margin-top: 1rem; }
+
+/* chispitas de emoji al reaccionar */
+.chispas { position: fixed; z-index: 80; width: 0; height: 0; pointer-events: none; }
+.chispa {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: var(--tam);
+  line-height: 1;
+  transform: translate(-50%, -50%);
+  animation: chispa 1s cubic-bezier(.2, .8, .4, 1) var(--demora) both;
+}
+@keyframes chispa {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.3); }
+  15% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) rotate(var(--giro)) scale(1.1); }
+}
+
+/* ---------------------------------------------------------------- postal */
+.visor-acciones { flex-wrap: wrap; justify-content: center; }
+.visor-postal .papel-carga { margin: 0; }
+.visor-cerrar {
+  position: absolute;
+  top: calc(var(--arriba) + 12px);
+  right: 14px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: var(--trazo);
+  border-radius: 50%;
+  background: var(--papel);
+  box-shadow: var(--sombra-chica);
+}
+.visor-cerrar:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--tinta); }
+.visor-marco.postal { padding: 0; border: 0; background: none; box-shadow: none; transform: none; }
+.visor-marco.postal img {
+  max-height: 72vh;
+  max-height: 72dvh;
+  border: var(--trazo);
+  border-radius: 10px;
+  box-shadow: 5px 6px 0 rgba(0, 0, 0, .35);
+  animation: postal-llega .55s cubic-bezier(.3, 1.4, .5, 1) both;
+}
+@keyframes postal-llega { from { opacity: 0; transform: translateY(34px) rotate(4deg) scale(.88); } }
+
 /* ---------------------------------------------------------------- menos movimiento */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

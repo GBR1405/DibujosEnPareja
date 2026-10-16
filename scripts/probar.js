@@ -185,6 +185,7 @@ function servidorAparte(env) {
     assert.equal((await pedir('GET', `/api/dibujo/${hoy}/dos?mini=1`, { cookie: A.cookie })).estado, 403);
     const mesAntes = (await pedir('GET', `/api/mes/${hoy.slice(0, 7)}`, { cookie: A.cookie })).datos.dias.find((d) => d.fecha === hoy);
     assert.deepEqual([mesAntes.yo, mesAntes.pareja.visible, mesAntes.pareja.mini], [null, false, null]); paso('ni el calendario lo filtra');
+    assert.equal((await pedir('POST', '/api/reaccion', { cookie: A.cookie, cuerpo: { fecha: hoy, reaccion: 'corazon' } })).estado, 403); paso('tampoco se puede reaccionar a un dibujo que todavía no te toca ver');
 
     console.log('Recordatorio del mediodía');
     const cron = (cabeceras, metodo = 'GET') => pedir(metodo, '/api/cron/recordatorio', { cabeceras });
@@ -250,10 +251,58 @@ function servidorAparte(env) {
     assert.ok(JSON.stringify(mes).length < 400_000); paso(`un mes entero pesa ${(JSON.stringify(mes).length / 1024).toFixed(0)} KB`);
     assert.equal((await pedir('GET', '/api/mes/2019-05', { cookie: A.cookie })).estado, 400);
 
+    console.log('Reacciones y notitas');
+    const reaccionar = (cookie, cuerpo) => pedir('POST', '/api/reaccion', { cookie, cuerpo });
+    const notasDe = async (cookie) => (await pedir('GET', '/api/hoy', { cookie })).datos.notas;
+    const reaccionesDeLaApp = (await pedir('GET', '/api/yo', { cookie: A.cookie })).datos.reacciones;
+    assert.ok(reaccionesDeLaApp.length >= 6 && reaccionesDeLaApp.every((r) => r.id && r.emoji && r.nombre)); paso(`la app recibe la lista de reacciones: ${reaccionesDeLaApp.map((r) => r.emoji).join(' ')}`);
+    const emoji = (id) => reaccionesDeLaApp.find((r) => r.id === id).emoji;
+    assert.equal((await pedir('POST', '/api/reaccion', { cuerpo: { fecha: hoy, reaccion: 'corazon' } })).estado, 401);
+    const malas = [
+      { fecha: hoy },
+      { fecha: 'ayer', reaccion: 'corazon' },
+      { fecha: F.sumarDias(hoy, 1), reaccion: 'corazon' },
+      { fecha: hoy, reaccion: 'no-existe' },
+      { fecha: hoy, comentario: 'x'.repeat(121) },
+      { fecha: hoy, comentario: 42 },
+    ];
+    for (const mala of malas) assert.equal((await reaccionar(A.cookie, mala)).estado, 400, JSON.stringify(mala).slice(0, 80));
+    paso('se rechaza lo que no vale: nada que guardar, fechas raras, emojis inventados, notitas larguísimas');
+    assert.equal((await reaccionar(B.cookie, { fecha: ayer, reaccion: 'corazon' })).estado, 404); paso('no se puede reaccionar a un dibujo que no existe');
+
+    intentos.length = 0;
+    const conAmor = await reaccionar(A.cookie, { fecha: hoy, reaccion: 'amor' });
+    assert.deepEqual(conAmor.datos.nota, { reaccion: 'amor', comentario: null });
+    assert.deepEqual(await notasDe(B.cookie), { mio: { reaccion: 'amor', comentario: null }, suyo: null });
+    assert.deepEqual(await notasDe(A.cookie), { mio: null, suyo: { reaccion: 'amor', comentario: null } }); paso(`${gabri} reacciona ${emoji('amor')} al dibujo de ${eli} y las dos cuentas lo ven en su lugar`);
+    assert.deepEqual(intentos.map((i) => [i.endpoint, i.titulo, i.tag, i.renotify]), [[EP('dos-telefono'), `${gabri} reaccionó ${emoji('amor')} a tu dibujo de hoy`, 'reaccion', false]]); paso(`a ${eli} le llega un aviso: "${intentos[0].titulo}"`);
+    intentos.length = 0;
+    await reaccionar(A.cookie, { fecha: hoy, reaccion: 'amor' });
+    assert.equal(intentos.length, 0); paso('repetir la misma reacción no vuelve a avisar');
+    const conNotita = await reaccionar(A.cookie, { fecha: hoy, comentario: '  ¡Qué   lindo\n te quedó!  ' });
+    assert.deepEqual(conNotita.datos.nota, { reaccion: 'amor', comentario: '¡Qué lindo te quedó!' }); paso('la notita se guarda en una sola línea y la reacción se queda');
+    assert.equal(intentos[0].titulo, `${gabri} te dejó una notita ${emoji('amor')}`);
+    assert.match(intentos[0].texto, /«¡Qué lindo te quedó!»/); paso(`y avisa: "${intentos[0].titulo}"`);
+    const largo = '💛'.repeat(120);
+    assert.equal((await reaccionar(A.cookie, { fecha: hoy, comentario: largo })).datos.nota.comentario, largo); paso('caben 120 letras (un emoji cuenta como una)');
+    assert.equal((await reaccionar(B.cookie, { fecha: hoy, reaccion: 'risa' })).estado, 200);
+    assert.deepEqual(await notasDe(A.cookie), { mio: { reaccion: 'risa', comentario: null }, suyo: { reaccion: 'amor', comentario: largo } }); paso('cada quien reacciona al dibujo del otro, por separado');
+    const conNotas = (await pedir('GET', `/api/mes/${hoy.slice(0, 7)}`, { cookie: A.cookie })).datos.dias.find((d) => d.fecha === hoy);
+    assert.deepEqual([conNotas.yo.nota.reaccion, conNotas.pareja.nota.reaccion, conNotas.pareja.nota.comentario], ['risa', 'amor', largo]); paso('el calendario también trae las reacciones');
+    intentos.length = 0;
+    const quitada = await reaccionar(A.cookie, { fecha: hoy, reaccion: null, comentario: '' });
+    assert.equal(quitada.datos.nota, null);
+    assert.equal((await notasDe(B.cookie)).mio, null);
+    assert.equal(intentos.length, 0); paso('quitar la reacción y la notita las borra, sin avisar');
+    const deAyer = await reaccionar(A.cookie, { fecha: ayer, reaccion: 'estrella' });
+    assert.equal(deAyer.estado, 200);
+    assert.equal(intentos[0].titulo, `${gabri} reaccionó ${emoji('estrella')} a tu dibujo del ${F.fechaCorta(ayer)}`); paso(`en un día que ya pasó se puede reaccionar aunque uno no dibujara: "${intentos[0].titulo}"`);
+
     console.log('Año nuevo');
     const anioPasado = F.anioDe(hoy) - 1;
     await base.insertarCrudo({ fecha: `${anioPasado}-12-31`, quien: 'uno', imagen: Buffer.from('x'), mini: Buffer.from('y') });
     await base.insertarCrudo({ fecha: `${anioPasado}-06-15`, quien: 'dos', imagen: Buffer.from('x'), mini: Buffer.from('y') });
+    await base.guardarReaccion({ fecha: `${anioPasado}-06-15`, quien: 'dos', reaccion: 'corazon', comentario: 'del año pasado' });
     const antes = await base.contar();
     server.reiniciarRevisionDeAnio();
     await pedir('GET', '/api/yo', { cookie: A.cookie });
@@ -261,6 +310,8 @@ function servidorAparte(env) {
     const delAnioPasado = F.anioDe(ayer) < F.anioDe(hoy) ? 3 : 2;
     assert.equal(await base.contar(), antes - delAnioPasado); paso('al empezar el año se borra lo del año anterior…');
     assert.equal((await pedir('GET', `/api/dibujo/${hoy}/uno`, { cookie: A.cookie })).estado, 200); paso('…y lo de este año se queda');
+    assert.equal(await base.reaccionDe(`${anioPasado}-06-15`, 'dos'), null);
+    assert.equal((await base.reaccionDe(hoy, 'uno')).reaccion, 'risa'); paso('las reacciones del año pasado también se borran; las de este año, no');
 
     console.log('Avisos: cuando algo sale mal');
     if (F.anioDe(ayer) === F.anioDe(hoy)) {

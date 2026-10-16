@@ -24,6 +24,9 @@ const TRAZOS = {
   retroceso: '<path d="M12 7h12a2.5 2.5 0 0 1 2.5 2.5v13A2.5 2.5 0 0 1 24 25H12L5.5 16z"/><path d="M15.5 12l7 8M22.5 12l-7 8"/>',
   contorno: '<path d="M16 6l11 19.5H5z"/>',
   relleno: '<path d="M16 6l11 19.5H5z" fill="currentColor"/>',
+  enviar: '<path d="M5.5 15.5L26.5 6l-6.5 20.5-4.6-8.3z"/><path d="M15.4 18.2L26.5 6"/>',
+  compartir: '<path d="M16 19V5.5M10.5 11L16 5.5l5.5 5.5"/><path d="M9.5 14.5H8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1.5"/>',
+  postal: '<rect x="4.5" y="7.5" width="23" height="17" rx="3"/><path d="M17.5 12h6M17.5 16h6M17.5 20h4"/><rect x="8" y="11" width="6" height="7" rx="1"/>',
   campana: '<path d="M8.5 22.5V15a7.5 7.5 0 0 1 15 0v7.5l2.2 2.7H6.3z"/><path d="M13.3 27.5a2.9 2.9 0 0 0 5.4 0"/><path d="M16 5V7.5"/>',
 };
 

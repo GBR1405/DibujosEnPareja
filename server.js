@@ -7,6 +7,7 @@ const { abrir } = require('./lib/base');
 const { comprimir } = require('./lib/imagen');
 const { temaDelDia } = require('./lib/tema-del-dia');
 const { crearAvisos } = require('./lib/avisos');
+const { REACCIONES, reaccionPorId, LARGO_COMENTARIO } = require('./lib/reacciones');
 const F = require('./lib/fecha');
 
 // ---------------------------------------------------------------- arranque
@@ -141,6 +142,38 @@ function avisarALaPareja(yo, fecha) {
   });
 }
 
+// ---------------------------------------------------------------- reacciones
+// Lo que ve la app de una reacción: { reaccion, comentario }, o null si no hay nada.
+// (Si alguien quitó un emoji de lib/reacciones.js, las reacciones viejas con él se ignoran.)
+function verNota(fila) {
+  const reaccion = fila && reaccionPorId(fila.reaccion) ? fila.reaccion : null;
+  const comentario = (fila && fila.comentario) || null;
+  return reaccion || comentario ? { reaccion, comentario } : null;
+}
+
+// La notita: una sola línea, sin espacios de más, y cortita.
+function leerComentario(texto) {
+  if (typeof texto !== 'string') return undefined;
+  const limpio = texto.replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim();
+  return [...limpio].length <= LARGO_COMENTARIO ? limpio : undefined;
+}
+
+// Cuando alguien reacciona o deja una notita, se le avisa al dueño del dibujo. Quitar una
+// reacción, o volver a poner la misma, no avisa. Si cambia varias veces seguidas, el aviso
+// nuevo reemplaza al anterior sin volver a sonar.
+function avisarReaccion(yo, fecha, antes, ahora, hoy) {
+  const reaccionNueva = Boolean(ahora && ahora.reaccion) && ahora.reaccion !== (antes && antes.reaccion);
+  const notitaNueva = Boolean(ahora && ahora.comentario) && ahora.comentario !== (antes && antes.comentario);
+  if (!reaccionNueva && !notitaNueva) return null;
+  const nombre = porId.get(yo).nombre;
+  const emoji = ahora.reaccion ? reaccionPorId(ahora.reaccion).emoji : '';
+  const cual = fecha === hoy ? 'tu dibujo de hoy' : `tu dibujo del ${F.fechaCorta(fecha)}`;
+  const mensaje = notitaNueva
+    ? { titulo: `${nombre} te dejó una notita ${emoji || '💌'}`, texto: `«${ahora.comentario}» (en ${cual})` }
+    : { titulo: `${nombre} reaccionó ${emoji} a ${cual}`, texto: 'Ábrelo en Garabatos para verlo 💛' };
+  return avisos.avisar([{ quien: parejaDe(yo), mensaje: { ...mensaje, tag: 'reaccion', ttl: 12 * HORAS, renotify: false } }]);
+}
+
 // ---------------------------------------------------------------- servidor
 const app = express();
 app.set('trust proxy', 1);
@@ -237,7 +270,12 @@ app.use('/api', requiereSesion);
 
 app.get('/api/yo', (req, res) => {
   const ver = ({ id, nombre, color, carita }) => ({ id, nombre, color, carita });
-  res.json({ yo: ver(porId.get(req.yo)), pareja: ver(porId.get(parejaDe(req.yo))) });
+  res.json({
+    yo: ver(porId.get(req.yo)),
+    pareja: ver(porId.get(parejaDe(req.yo))),
+    reacciones: REACCIONES,
+    largoComentario: LARGO_COMENTARIO,
+  });
 });
 
 // Días seguidos (hasta hoy, o hasta ayer si hoy aún no han terminado los dos).
@@ -252,9 +290,10 @@ function calcularRacha(fechas, fecha) {
 app.get('/api/hoy', async (req, res) => {
   const fecha = req.hoy;
   const otra = parejaDe(req.yo);
-  const { deHoy, fechasCompletas } = await base.resumenDeHoy(fecha);
+  const { deHoy, fechasCompletas, reacciones } = await base.resumenDeHoy(fecha);
   const mio = deHoy.find((f) => f.quien === req.yo);
   const suyo = deHoy.find((f) => f.quien === otra);
+  const notaDe = (quien) => verNota(reacciones.find((r) => r.quien === quien));
 
   res.json({
     fecha,
@@ -264,6 +303,8 @@ app.get('/api/hoy', async (req, res) => {
     miV: mio ? mio.creado : null,
     // La pareja solo "se ve" cuando yo ya terminé el mío.
     parejaV: mio && suyo ? suyo.creado : null,
+    // La reacción que mi pareja le dejó a mi dibujo, y la que yo le dejé al suyo.
+    notas: { mio: mio ? notaDe(req.yo) : null, suyo: mio && suyo ? notaDe(otra) : null },
     racha: calcularRacha(fechasCompletas, fecha),
     anio: F.anioDe(fecha),
     diasParaReinicio: F.diasHastaFinDeAnio(fecha),
@@ -286,6 +327,34 @@ app.post('/api/terminar', async (req, res) => {
   // ~3 s y nunca falla: si el aviso no sale, el dibujo igual quedó guardado.
   if (fecha === req.hoy) await avisarALaPareja(req.yo, fecha);
   return res.json({ ok: true, bytes: listo.imagen.length });
+});
+
+// ---- reacciones
+// Reaccionar al dibujo de la pareja: un emoji y/o una notita. Se puede cambiar cuando se
+// quiera; `reaccion: null` o `comentario: ''` lo quitan, y lo que no se manda se queda igual.
+app.post('/api/reaccion', async (req, res) => {
+  const { fecha, reaccion, comentario } = req.body || {};
+  if (!F.esFecha(fecha) || fecha > req.hoy) return res.status(400).json({ error: 'fecha_invalida' });
+  if (reaccion === undefined && comentario === undefined) return res.status(400).json({ error: 'nada_que_guardar' });
+  if (reaccion != null && !reaccionPorId(reaccion)) return res.status(400).json({ error: 'reaccion_invalida' });
+  const texto = comentario == null ? comentario : leerComentario(comentario);
+  if (comentario != null && texto === undefined) return res.status(400).json({ error: 'comentario_invalido' });
+
+  // Solo se reacciona a lo que uno puede ver (las mismas reglas que /api/dibujo):
+  // el dibujo de la pareja existe y, si es de hoy, yo ya terminé el mío.
+  const otra = parejaDe(req.yo);
+  const terminaron = await base.terminaronEl(fecha);
+  if (!terminaron.includes(otra)) return res.status(404).json({ error: 'sin_dibujo' });
+  if (!terminaron.includes(req.yo) && fecha >= req.hoy) return res.status(403).json({ error: 'todavia_no' });
+
+  const antes = verNota(await base.reaccionDe(fecha, otra));
+  const ahora = {
+    reaccion: reaccion === undefined ? (antes && antes.reaccion) || null : reaccion,
+    comentario: comentario === undefined ? (antes && antes.comentario) || null : texto || null,
+  };
+  await base.guardarReaccion({ fecha, quien: otra, ...ahora });
+  await avisarReaccion(req.yo, fecha, antes, verNota(ahora), req.hoy);
+  return res.json({ ok: true, nota: verNota(ahora) });
 });
 
 // ---- avisos al teléfono
@@ -329,7 +398,11 @@ app.get('/api/mes/:mes', async (req, res) => {
   if (!m || +m[1] !== anio || +m[2] < 1 || +m[2] > 12) return res.status(400).json({ error: 'mes_invalido' });
 
   const numero = +m[2];
-  const filas = await base.mes(anio, numero);
+  const [filas, reacciones] = await Promise.all([
+    base.mes(anio, numero),
+    base.reaccionesEntre(`${req.params.mes}-01`, `${req.params.mes}-31`),
+  ]);
+  const notas = new Map(reacciones.map((r) => [`${r.fecha}/${r.quien}`, verNota(r)]));
   const porDia = new Map();
   for (const f of filas) {
     if (!porDia.has(f.fecha)) porDia.set(f.fecha, {});
@@ -350,8 +423,10 @@ app.get('/api/mes/:mes', async (req, res) => {
       fecha,
       futuro,
       tema: futuro ? null : temaDelDia(fecha),
-      yo: mio ? { v: mio.creado, mini: url(mio.mini) } : null,
-      pareja: suyo ? { v: suyo.creado, visible, mini: visible ? url(suyo.mini) : null } : null,
+      yo: mio ? { v: mio.creado, mini: url(mio.mini), nota: notas.get(`${fecha}/${req.yo}`) || null } : null,
+      pareja: suyo ? {
+        v: suyo.creado, visible, mini: visible ? url(suyo.mini) : null, nota: (visible && notas.get(`${fecha}/${otra}`)) || null,
+      } : null,
     });
   }
   res.json({ hoy: req.hoy, anio, dias });

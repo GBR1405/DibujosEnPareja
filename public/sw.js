@@ -13,9 +13,10 @@ self.addEventListener('push', (event) => {
   event.waitUntil(self.registration.showNotification(datos.titulo || 'Garabatos', {
     body: datos.texto || '',
     icon: '/icono-192.png',
-    // Un aviso nuevo del mismo tipo reemplaza al anterior en vez de amontonarse.
+    // Un aviso nuevo del mismo tipo reemplaza al anterior en vez de amontonarse
+    // (y vuelve a sonar, salvo las reacciones: si cambian seguido, no molestan).
     tag: datos.tag || 'garabatos',
-    renotify: true,
+    renotify: datos.renotify !== false,
     lang: 'es',
     data: { url: datos.url || '/' },
   }));

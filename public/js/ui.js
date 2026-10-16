@@ -95,6 +95,39 @@ export function confirmar({ titulo, texto, si, no, claseSi = 'fresa' }) {
   });
 }
 
+// ------------------------------------------------------------------ archivos
+// Baja un archivo (un Blob) con ese nombre.
+export function descargar(blob, nombreArchivo) {
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: nombreArchivo });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+// ------------------------------------------------------------------ chispitas
+// Unos cuantos `emoji` que salen volando hacia arriba desde `desde` (un elemento).
+export function chispas(emoji, desde, cantidad = 7) {
+  if (!emoji || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const r = desde.getBoundingClientRect();
+  const capa = h('div', { class: 'chispas', 'aria-hidden': 'true', style: { left: `${r.left + r.width / 2}px`, top: `${r.top + r.height / 2}px` } });
+  for (let i = 0; i < cantidad; i += 1) {
+    capa.append(h('span', {
+      class: 'chispa',
+      style: {
+        '--dx': `${Math.round((Math.random() - 0.5) * 140)}px`,
+        '--dy': `${-60 - Math.round(Math.random() * 90)}px`,
+        '--giro': `${Math.round(Math.random() * 70 - 35)}deg`,
+        '--demora': `${i * 40}ms`,
+        '--tam': `${20 + Math.round(Math.random() * 14)}px`,
+      },
+    }, emoji));
+  }
+  document.body.append(capa);
+  setTimeout(() => capa.remove(), 1400);
+}
+
 // ------------------------------------------------------------------ confeti
 export function lluviaDeCorazones(cantidad = 18) {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;

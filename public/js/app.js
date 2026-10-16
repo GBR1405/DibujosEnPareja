@@ -1,8 +1,11 @@
 import { api, urlDibujo } from './api.js';
-import { h, aviso, hoja, confirmar, lluviaDeCorazones } from './ui.js';
+import { h, aviso, hoja, confirmar, lluviaDeCorazones, descargar } from './ui.js';
 import { icono, carita } from './iconos.js';
 import { crearLienzo } from './lienzo.js';
 import { controlAvisos, sincronizarAvisos, salirConAvisos } from './avisos.js';
+import { conocerReacciones, emojiDe, pegatina, repegar, burbuja, panelReaccion } from './reacciones.js';
+import { crearPostal, abrirPostal } from './postal.js';
+import { crearMascota } from './mascota.js';
 
 const raiz = document.getElementById('app');
 let sesion = null; // { yo, pareja }
@@ -25,6 +28,13 @@ const caritaDe = (cuenta, clase = '', triste = false) => {
   el.innerHTML = carita(cuenta.carita, cuenta.color, triste);
   return el;
 };
+
+// Quién soy, quién es mi pareja y la lista de reacciones.
+async function pedirSesion() {
+  const s = await api.yo();
+  conocerReacciones(s);
+  return s;
+}
 
 function navegar(ruta) {
   if (location.hash === `#/${ruta}`) ir(); else location.hash = `#/${ruta}`;
@@ -80,7 +90,7 @@ function pantallaEntrar(cont) {
         ocupado = true;
         try {
           await api.entrar(cuenta.id, pin);
-          sesion = await api.yo();
+          sesion = await pedirSesion();
           soltarTeclado();
           navegar('hoy');
         } catch (e) {
@@ -174,7 +184,8 @@ function botonPerfil() {
 }
 
 // ================================================================== polaroids y visor
-function polaroid({ src, nombre, giro, alAbrir, nuevo }) {
+// `nota`: la reacción que le dejaron a este dibujo (sale como pegatina en la esquina).
+function polaroid({ src, nombre, giro, alAbrir, nuevo, nota }) {
   return h('button', {
     type: 'button',
     class: `polaroid ${nuevo ? 'aparece' : ''}`,
@@ -183,7 +194,8 @@ function polaroid({ src, nombre, giro, alAbrir, nuevo }) {
     onclick: alAbrir,
   },
   h('img', { src, alt: `Dibujo de ${nombre}`, draggable: 'false' }),
-  h('span', { class: 'polaroid-nombre' }, nombre));
+  h('span', { class: 'polaroid-nombre' }, nombre),
+  pegatina(nota));
 }
 
 // Cuando alguien no dibujó ese día: solo su carita triste.
@@ -196,25 +208,20 @@ function polaroidTriste({ cuenta, giro }) {
 // El dibujo se baja como PNG, que se abre en cualquier aplicación (el WebP no siempre).
 async function guardarImagen(src, nombreArchivo) {
   try {
-    const original = await (await fetch(src)).blob();
+    // Se carga como <img> y no con fetch: en el calendario `src` es una dirección blob:
+    // y la CSP (connect-src 'self') no deja hacer fetch a esas.
     const imagen = await new Promise((ok, fallo) => {
       const img = new Image();
-      const url = URL.createObjectURL(original);
-      img.onload = () => { URL.revokeObjectURL(url); ok(img); };
+      img.onload = () => ok(img);
       img.onerror = fallo;
-      img.src = url;
+      img.src = src;
     });
     const c = document.createElement('canvas');
     c.width = imagen.naturalWidth;
     c.height = imagen.naturalHeight;
     c.getContext('2d').drawImage(imagen, 0, 0);
     const png = await new Promise((ok) => { c.toBlob(ok, 'image/png'); });
-    const url = URL.createObjectURL(png);
-    const a = h('a', { href: url, download: `${nombreArchivo}.png` });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    descargar(png, `${nombreArchivo}.png`);
   } catch {
     aviso('No se pudo guardar la imagen. Mantén presionada la imagen para guardarla.');
   }
@@ -239,7 +246,8 @@ function abrirVisor({ src, nombre, titulo, archivo }) {
 
 // Los dos marcos de un día: el mío y el de mi pareja (dibujo o carita triste).
 // `fuente(fecha, cuenta, v)` devuelve de dónde cargar la imagen completa.
-function marcosDelDia({ fecha, tema, miV, parejaV, nuevo, fuente }) {
+// `notaMia` es lo que mi pareja le dejó a mi dibujo; `notaSuya`, lo que yo le dejé al suyo.
+function marcosDelDia({ fecha, tema, miV, parejaV, nuevo, fuente, notaMia, notaSuya }) {
   const abrir = (cuenta, v) => () => abrirVisor({
     src: fuente(fecha, cuenta, v),
     nombre: cuenta.nombre,
@@ -247,15 +255,65 @@ function marcosDelDia({ fecha, tema, miV, parejaV, nuevo, fuente }) {
     archivo: `garabato-${fecha}-${cuenta.nombre.toLowerCase().replace(/\s+/g, '-')}`,
   });
   const mio = miV
-    ? polaroid({ src: fuente(fecha, sesion.yo, miV), nombre: sesion.yo.nombre, giro: '-2.2deg', alAbrir: abrir(sesion.yo, miV) })
+    ? polaroid({ src: fuente(fecha, sesion.yo, miV), nombre: sesion.yo.nombre, giro: '-2.2deg', alAbrir: abrir(sesion.yo, miV), nota: notaMia })
     : polaroidTriste({ cuenta: sesion.yo, giro: '-2.2deg' });
   const suyo = parejaV
-    ? polaroid({ src: fuente(fecha, sesion.pareja, parejaV), nombre: sesion.pareja.nombre, giro: '2.4deg', alAbrir: abrir(sesion.pareja, parejaV), nuevo })
+    ? polaroid({ src: fuente(fecha, sesion.pareja, parejaV), nombre: sesion.pareja.nombre, giro: '2.4deg', alAbrir: abrir(sesion.pareja, parejaV), nuevo, nota: notaSuya })
     : polaroidTriste({ cuenta: sesion.pareja, giro: '2.4deg' });
   return { mio, suyo };
 }
 
 const desdeElServidor = (fecha, cuenta, v) => urlDibujo(fecha, cuenta.id, v);
+
+// El botón "Postal": arma una imagen con los dos dibujos del día. `datos()` se lee al
+// tocarlo, así la postal lleva las reacciones más recientes.
+function botonPostal(datos) {
+  return h('button', {
+    type: 'button',
+    class: 'boton blanco postal-boton',
+    onclick: () => {
+      const { fecha, tema, miV, parejaV, notaMia, notaSuya, fuente } = datos();
+      const lados = [
+        { cuenta: sesion.yo, src: miV ? fuente(fecha, sesion.yo, miV) : null, nota: notaMia, autor: sesion.pareja },
+        { cuenta: sesion.pareja, src: parejaV ? fuente(fecha, sesion.pareja, parejaV) : null, nota: notaSuya, autor: sesion.yo },
+      ];
+      abrirPostal({
+        nombreArchivo: `garabatos-${fecha}`,
+        armar: () => crearPostal({ fechaTexto: `${fechaLarga(fecha)} de ${partes(fecha)[0]}`, tema, dibujos: lados, emojiDe }),
+      });
+    },
+  }, icono('postal'), 'Postal de los dos');
+}
+
+// Lo que dice Garabatito en la pantalla de Hoy, según cómo va el día.
+function queDiceGarabatito(d) {
+  const p = sesion.pareja.nombre;
+  const hora = new Date().getHours();
+  const deHoy = (lista) => lista[[...d.fecha].reduce((suma, c) => suma + c.charCodeAt(0), 0) % lista.length];
+  const notaMia = d.notas && d.notas.mio;
+  if (!d.yoListo) {
+    if (d.parejaListo) return { texto: `¡${p} ya dibujó! Te está esperando 👀`, animo: 'feliz' };
+    if (hora >= 21) return { texto: 'Todavía estás a tiempo: el día termina a medianoche 🌙', animo: 'normal' };
+    if (d.racha >= 2) return { texto: `¡Llevan ${d.racha} días seguidos! Que no se rompa la racha 🔥`, animo: 'normal' };
+    return {
+      texto: deHoy([
+        `¿Cómo te imaginas «${d.tema}»? ¡Quiero verlo!`,
+        'Un garabato chiquito también cuenta ✏️',
+        'No tiene que quedar perfecto: tiene que quedar tuyo 💛',
+        `Apuesto a que ${p} va a sonreír con tu dibujo.`,
+        '¡Ya me sacaron punta! ¿Empezamos? ✏️',
+      ]),
+      animo: 'normal',
+    };
+  }
+  if (!d.parejaV) return { texto: deHoy([`¡Te quedó precioso! Ahora a esperar a ${p} ⏳`, `Guardadito. Cuando ${p} termine, aparece aquí ✨`]), animo: 'feliz' };
+  if (notaMia && notaMia.comentario) return { texto: `¡${p} te dejó una notita! Mírala abajo 💌`, animo: 'feliz' };
+  if (notaMia && notaMia.reaccion) return { texto: `¡${p} reaccionó a tu dibujo! ${emojiDe(notaMia.reaccion) || ''}`, animo: 'feliz' };
+  if (!(d.notas && d.notas.suyo)) return { texto: `¿Qué te pareció el de ${p}? Déjale una reacción 💛`, animo: 'normal' };
+  if (hora >= 22 || hora < 5) return { texto: 'Buenas noches… mañana dibujamos otra vez 🌙', animo: 'dormido' };
+  if ([7, 14, 30, 50, 100, 200, 300, 365].includes(d.racha)) return { texto: `¡${d.racha} días seguidos dibujando juntos! Son increíbles 🏆`, animo: 'feliz' };
+  return { texto: deHoy(['¡Qué lindos les quedaron! Mañana más 🌈', '¡Otro día para el álbum! Pueden guardar la postal 📮', 'Hoy vi dos obras de arte 🖼️']), animo: 'feliz' };
+}
 
 // ================================================================== hoy
 async function pantallaHoy(cont, vigente) {
@@ -268,19 +326,41 @@ async function pantallaHoy(cont, vigente) {
   const yaVisto = () => { try { return localStorage.getItem(claveReveal()) === '1'; } catch { return false; } };
   const marcarVisto = () => { try { localStorage.setItem(claveReveal(), '1'); } catch { /* sin almacenamiento */ } };
   const avisos = controlAvisos(sesion);
+  // Estos tres se crean una sola vez y se vuelven a poner en cada repintado, así no se
+  // pierde lo que estés escribiendo en la notita ni se reinicia la mascota.
+  const mascota = crearMascota();
+  let panel = null;
+  let polaroidSuya = null;
+  let primeraVez = true;
 
   const quien = (cuenta, listo) => h('li', { class: `quien ${listo ? 'listo' : ''}` },
     caritaDe(cuenta, 'chica', !listo),
     h('span', { class: 'quien-texto' }, h('strong', null, cuenta.nombre), listo ? ' ya dibujó' : ' todavía no dibuja'));
 
+  function hablaGarabatito() {
+    const { texto, animo } = queDiceGarabatito(datos);
+    mascota.animo(animo);
+    mascota.decir(texto);
+  }
+
+  // Cuando reacciono al dibujo de mi pareja: la pegatina cambia al instante.
+  function alReaccionar(nota, { animar } = {}) {
+    datos.notas = { ...datos.notas, suyo: nota };
+    repegar(polaroidSuya, nota);
+    hablaGarabatito();
+    if (animar) mascota.saltar();
+  }
+
   function pintar() {
     const { fecha, tema, yoListo, parejaListo, racha, diasParaReinicio } = datos;
+    const notas = datos.notas || {};
     const hijos = [
       h('header', { class: 'cabecera' }, h('p', { class: 'fecha' }, fechaLarga(fecha)), botonPerfil()),
       racha > 0 && h('p', { class: 'racha' }, icono('corazon', { relleno: true }), `${racha} ${racha === 1 ? 'día' : 'días'} dibujando juntos`),
-      h('section', { class: 'tema', 'aria-label': 'Tema de hoy' },
+      h('section', { class: `tema ${primeraVez ? 'entra' : ''}`, 'aria-label': 'Tema de hoy' },
         h('p', { class: 'tema-intro' }, 'Hoy toca dibujar'),
         h('h1', { class: 'tema-texto' }, tema)),
+      mascota.el,
     ];
 
     if (!yoListo) {
@@ -289,15 +369,27 @@ async function pantallaHoy(cont, vigente) {
         h('a', { href: '#/dibujar', class: 'boton fresa grande' }, icono('pluma'), hayBorrador(fecha) ? 'Seguir dibujando' : '¡A dibujar!'));
     } else {
       const nuevo = Boolean(datos.parejaV) && !yaVisto();
-      const { mio, suyo } = marcosDelDia({ fecha, tema, miV: datos.miV, parejaV: datos.parejaV, nuevo, fuente: desdeElServidor });
+      const { mio, suyo } = marcosDelDia({
+        fecha, tema, miV: datos.miV, parejaV: datos.parejaV, nuevo, fuente: desdeElServidor, notaMia: notas.mio, notaSuya: notas.suyo,
+      });
+      polaroidSuya = datos.parejaV ? suyo : null;
+      if (datos.parejaV) {
+        if (!panel || panel.fecha !== fecha) panel = panelReaccion({ fecha, pareja: sesion.pareja, nota: notas.suyo, alCambiar: alReaccionar });
+        else panel.actualizar(notas.suyo);
+      }
       hijos.push(
         h('section', { class: 'revelado' },
           h('h2', { class: 'revelado-titulo' }, datos.parejaV ? 'Los dibujos de hoy' : 'Tu dibujo ya está guardado'),
           !datos.parejaV && h('p', { class: 'revelado-texto' }, `Cuando ${sesion.pareja.nombre} termine el suyo, aparece aquí.`),
-          h('div', { class: 'polaroids' }, mio, suyo)));
+          h('div', { class: 'polaroids' }, mio, suyo),
+          burbuja(sesion.pareja, notas.mio),
+          datos.parejaV && panel.el,
+          datos.parejaV && botonPostal(() => ({
+            fecha, tema, miV: datos.miV, parejaV: datos.parejaV, notaMia: (datos.notas || {}).mio, notaSuya: (datos.notas || {}).suyo, fuente: desdeElServidor,
+          }))));
       if (nuevo) {
         marcarVisto();
-        setTimeout(() => lluviaDeCorazones(), 450);
+        setTimeout(() => { lluviaDeCorazones(); mascota.saltar(); }, 450);
       }
     }
 
@@ -310,6 +402,8 @@ async function pantallaHoy(cont, vigente) {
           : `El 31 de diciembre empieza un año nuevo y los dibujos se borran. Guarden los que quieran conservar (faltan ${diasParaReinicio} ${diasParaReinicio === 1 ? 'día' : 'días'}).`));
     }
     pantalla.replaceChildren(...hijos.filter(Boolean));
+    hablaGarabatito();
+    primeraVez = false;
   }
 
   async function refrescar() {
@@ -596,17 +690,32 @@ async function pantallaCalendario(cont, vigente) {
   const fuenteLocal = (fecha, cuenta, v) => completas.get(`${fecha}/${cuenta.id}`) || urlDibujo(fecha, cuenta.id, v);
 
   function abrirDia(d) {
+    const visible = Boolean(d.pareja && d.pareja.visible);
+    const notaMia = (d.yo && d.yo.nota) || null;
     const { mio, suyo } = marcosDelDia({
       fecha: d.fecha, tema: d.tema,
-      miV: d.yo?.v, parejaV: d.pareja?.visible ? d.pareja.v : null,
-      fuente: fuenteLocal,
+      miV: d.yo?.v, parejaV: visible ? d.pareja.v : null,
+      fuente: fuenteLocal, notaMia, notaSuya: visible ? d.pareja.nota : null,
+    });
+    // Si reacciono aquí, se guarda en `d` para que al volver a abrir el día ya esté.
+    const panel = visible && panelReaccion({
+      fecha: d.fecha,
+      pareja: sesion.pareja,
+      nota: d.pareja.nota,
+      alCambiar: (nota) => { d.pareja.nota = nota; repegar(suyo, nota); },
     });
     hoja({
       titulo: fechaLarga(d.fecha),
       clase: 'hoja-dia',
       contenido: h('div', null,
         h('p', { class: 'hoja-tema' }, d.tema ? `Ese día tocó dibujar ${d.tema}.` : ''),
-        h('div', { class: 'polaroids chicos' }, mio, suyo)),
+        h('div', { class: 'polaroids chicos' }, mio, suyo),
+        burbuja(sesion.pareja, notaMia),
+        panel && panel.el,
+        (d.yo || visible) && botonPostal(() => ({
+          fecha: d.fecha, tema: d.tema, miV: d.yo?.v, parejaV: visible ? d.pareja.v : null,
+          notaMia, notaSuya: visible ? d.pareja.nota : null, fuente: fuenteLocal,
+        }))),
       acciones: [{ texto: 'Cerrar', clase: 'sol' }],
     });
   }
@@ -717,7 +826,7 @@ async function ir() {
 
   try {
     if (!sesion) {
-      try { sesion = await api.yo(); } catch (e) { if (e.estado !== 401) throw e; }
+      try { sesion = await pedirSesion(); } catch (e) { if (e.estado !== 401) throw e; }
     }
     if (!vigente()) return;
 
