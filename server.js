@@ -8,6 +8,7 @@ const { comprimir } = require('./lib/imagen');
 const { temaDelDia } = require('./lib/tema-del-dia');
 const { crearAvisos } = require('./lib/avisos');
 const { REACCIONES, reaccionPorId, LARGO_COMENTARIO } = require('./lib/reacciones');
+const { crearRadio } = require('./lib/radio');
 const F = require('./lib/fecha');
 
 // ---------------------------------------------------------------- arranque
@@ -18,6 +19,7 @@ const hoy = () => F.claveDeHoy(config.zonaHoraria);
 
 const base = abrir(config.turso);
 const avisos = crearAvisos({ base, claves: config.avisos });
+const radio = crearRadio();
 
 for (const c of cuentas) {
   if (!/^\d{4,8}$/.test(c.pin)) throw new Error(`El PIN de ${c.nombre} debe tener de 4 a 8 números.`);
@@ -186,7 +188,10 @@ app.use((req, res, next) => {
     'Referrer-Policy': 'same-origin',
     'Content-Security-Policy':
       "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
-      + "script-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; frame-ancestors 'none'",
+      + "script-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; frame-ancestors 'none'; "
+      // La radio: el audio viene directo de cada emisora (cualquier https). Solo afecta a
+      // <audio>, que no puede ejecutar código.
+      + 'media-src https:',
   });
   next();
 });
@@ -392,6 +397,13 @@ app.get('/api/dibujo/:fecha/:quien', async (req, res) => {
 });
 
 // Un mes completo: los días con sus temas y las miniaturas, en una sola respuesta.
+// La radio de la pantalla de dibujar: todos los estilos con sus emisoras, de una vez,
+// para que al tocar un estilo la música arranque en el mismo toque (el iPhone lo exige).
+app.get('/api/radio', async (req, res) => {
+  res.set('Cache-Control', 'private, max-age=1800');
+  res.json({ estilos: await radio.catalogo() });
+});
+
 app.get('/api/mes/:mes', async (req, res) => {
   const m = /^(\d{4})-(\d{2})$/.exec(req.params.mes);
   const anio = F.anioDe(req.hoy);
@@ -468,5 +480,6 @@ module.exports = app;
 module.exports.app = app;
 module.exports.base = base;
 module.exports.avisos = avisos;
+module.exports.radio = radio;
 module.exports.mantenimiento = mantenimiento;
 module.exports.reiniciarRevisionDeAnio = () => { anioRevisado = null; };

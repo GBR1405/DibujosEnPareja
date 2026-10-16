@@ -339,6 +339,55 @@ function servidorAparte(env) {
     const clavesMalas = servidorAparte({ VAPID_PUBLIC_KEY: 'no-es-una-clave', VAPID_PRIVATE_KEY: 'tampoco', VAPID_SUBJECT: 'mailto:a@b.test' });
     assert.deepEqual([clavesMalas.clave, clavesMalas.terminar], [null, 200]); paso('con claves VAPID mal copiadas tampoco se cae');
 
+    console.log('Radio');
+    const { ESTILOS } = require('../lib/radio');
+    const emisora = (id, url, extra = {}) => ({ stationuuid: id, name: `Emisora ${id.slice(0, 4)}`, url_resolved: url, codec: 'MP3', hls: 0, lastcheckok: 1, tags: 'music', votes: 1, ...extra });
+    const lofi = ESTILOS.find((e) => e.id === 'lofi').emisoras.map(([id]) => id);
+    const sinRespuesta = ESTILOS.find((e) => e.id === 'chill').emisoras[0][0];
+    const preguntas = [];
+    server.radio.usarBuscador(async (ruta) => {
+      preguntas.push(ruta);
+      if (ruta.startsWith('/json/stations/byuuid')) {
+        const ids = new URLSearchParams(ruta.split('?')[1]).get('uuids').split(',');
+        const guardada = new Map(ESTILOS.flatMap((e) => e.emisoras).map(([id, , url]) => [id, url]));
+        return ids.filter((id) => id !== sinRespuesta).map((id) => {
+          if (id === lofi[0]) return emisora(id, 'https://nueva.ejemplo/lofi.mp3');
+          if (id === lofi[1]) return emisora(id, guardada.get(id), { lastcheckok: 0 });
+          if (id === lofi[2]) return emisora(id, 'http://sin-https.ejemplo/lofi.mp3');
+          if (id === lofi[3]) return emisora(id, guardada.get(id), { hls: 1 });
+          if (id === lofi[4]) return emisora(id, guardada.get(id), { codec: 'OGG' });
+          return emisora(id, guardada.get(id));
+        });
+      }
+      if (ruta.includes('tag=lofi')) {
+        return [
+          emisora('noticias-1', 'https://noticias.ejemplo/live.mp3', { tags: 'news,talk', votes: 999 }),
+          emisora('repetida-1', ESTILOS.find((e) => e.id === 'lofi').emisoras[5][2], { votes: 500 }),
+          emisora('nueva-poca', 'https://extra.ejemplo/a.mp3', { votes: 10 }),
+          emisora('nueva-mucha', 'https://extra.ejemplo/b.mp3', { votes: 50 }),
+        ];
+      }
+      return [];
+    });
+    assert.equal((await pedir('GET', '/api/radio')).estado, 401);
+    const conRadio = await pedir('GET', '/api/radio', { cookie: A.cookie });
+    assert.equal(conRadio.estado, 200);
+    const catalogo = conRadio.datos.estilos;
+    assert.equal(catalogo.length, ESTILOS.length);
+    assert.ok(catalogo.every((e) => e.nombre && e.emoji && e.emisoras.length > 0 && e.emisoras.every((x) => x.url.startsWith('https://') && x.nombre))); paso(`la radio trae ${catalogo.length} estilos: ${catalogo.map((e) => e.emoji).join(' ')}`);
+    const deLofi = catalogo.find((e) => e.id === 'lofi').emisoras.map((x) => x.url);
+    assert.equal(deLofi[0], 'https://nueva.ejemplo/lofi.mp3'); paso('si una emisora se mudó, se usa su dirección nueva');
+    assert.deepEqual(deLofi.slice(1), [ESTILOS.find((e) => e.id === 'lofi').emisoras[5][2], 'https://extra.ejemplo/b.mp3', 'https://extra.ejemplo/a.mp3']);
+    paso('se saltan las caídas, las sin https, las HLS y las OGG; y si quedan pocas se completa por etiqueta (sin noticias ni repetidas)');
+    assert.ok(catalogo.find((e) => e.id === 'chill').emisoras.some((x) => x.id === sinRespuesta)); paso('si la API no conoce una emisora, se usa la dirección guardada');
+    const yaPreguntadas = preguntas.length;
+    await pedir('GET', '/api/radio', { cookie: B.cookie });
+    assert.equal(preguntas.length, yaPreguntadas); paso('el catálogo se guarda un rato: no se le pregunta a la API cada vez');
+    server.radio.usarBuscador(async () => { throw new Error('Radio Browser caído'); });
+    const sinApi = (await pedir('GET', '/api/radio', { cookie: A.cookie })).datos.estilos;
+    assert.deepEqual(sinApi.find((e) => e.id === 'lofi').emisoras.map((x) => x.url), ESTILOS.find((e) => e.id === 'lofi').emisoras.map(([, , url]) => url)); paso('si Radio Browser no responde, suenan las emisoras guardadas');
+    assert.match((await pedir('GET', '/api/radio', { cookie: A.cookie })).cabeceras.get('content-security-policy'), /media-src https:/); paso("la CSP deja sonar audio de las emisoras (media-src https:) y nada más cambia");
+
     console.log('Protección de PIN');
     for (let i = 0; i < 5; i += 1) await entrar('dos', '000000');
     assert.equal((await entrar('dos', '222222')).estado, 429); paso('tras 5 fallos se bloquea un rato');

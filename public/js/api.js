@@ -26,6 +26,7 @@ export const api = {
   terminar: (cuerpo) => pedir('POST', '/api/terminar', cuerpo),
   mes: (mes) => pedir('GET', `/api/mes/${mes}`),
   reaccionar: (cuerpo) => pedir('POST', '/api/reaccion', cuerpo),
+  radio: () => pedir('GET', '/api/radio'),
   claveAvisos: () => pedir('GET', '/api/avisos/clave'),
   activarAvisos: (aparato) => pedir('POST', '/api/avisos/activar', aparato),
   desactivarAvisos: (endpoint) => pedir('POST', '/api/avisos/desactivar', { endpoint }),

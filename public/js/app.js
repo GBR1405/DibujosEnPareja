@@ -6,6 +6,7 @@ import { controlAvisos, sincronizarAvisos, salirConAvisos } from './avisos.js';
 import { conocerReacciones, emojiDe, pegatina, repegar, burbuja, panelReaccion } from './reacciones.js';
 import { crearPostal, abrirPostal } from './postal.js';
 import { crearMascota } from './mascota.js';
+import { crearRadio } from './radio.js';
 
 const raiz = document.getElementById('app');
 let sesion = null; // { yo, pareja }
@@ -548,14 +549,18 @@ async function pantallaDibujar(cont, vigente) {
       }, h('span', { class: `tamano-punto t-${id}` }))))));
 
   const botonTerminar = h('button', { type: 'button', class: 'boton fresa chico', onclick: pedirTerminar }, icono('check'), 'Terminar');
+  // La radio vive solo en esta pantalla: al salir (o al terminar) se apaga.
+  const radio = crearRadio();
 
   const pantalla = h('main', { class: 'pantalla dibujar' },
     h('header', { class: 'dibujar-cabecera' },
       h('button', { type: 'button', class: 'volver', 'aria-label': 'Volver a Hoy', onclick: volver }, icono('volver')),
       h('button', { type: 'button', class: 'tema-chip', onclick: () => aviso(tema, 4000), title: tema }, h('span', { class: 'tema-chip-texto' }, tema)),
+      radio.boton,
       botonTerminar),
     area,
-    dock);
+    dock,
+    radio.panel);
   cont.append(pantalla);
 
   lienzo = crearLienzo(caja, {
@@ -594,7 +599,7 @@ async function pantallaDibujar(cont, vigente) {
     const guardado = JSON.parse(localStorage.getItem(claveLocal) || 'null');
     if (guardado?.img) {
       const img = await cargarImagen(guardado.img);
-      if (!vigente()) return undefined;
+      if (!vigente()) { radio.destruir(); return undefined; }
       lienzo.cargarBase(img);
     }
   } catch { /* se empieza en blanco */ }
@@ -641,6 +646,7 @@ async function pantallaDibujar(cont, vigente) {
     cerrarSelector();
     guardarLocal();
     lienzo.destruir();
+    radio.destruir();
     document.body.classList.remove('modo-dibujo');
   };
 }

@@ -8,6 +8,7 @@ Además:
 
 - **Reacciones y notitas.** Al dibujo de tu pareja le puedes poner una reacción (❤️ 🥰 😍 😮 😂 🥺 🌟 👏) y dejarle una notita cortita (hasta 120 letras). La reacción aparece como una pegatina en la esquina de su polaroid y la notita como un globito con tu carita. Se puede cambiar o quitar cuando quieras, en Hoy o desde el calendario. Si tiene los avisos activados, le llega uno.
 - **Postal de los dos.** El botón **Postal de los dos** arma una imagen con los dos dibujos del día, como en la app: el tema en su cartelito, la fecha, las polaroids con nombre y carita, las reacciones, las notitas y "garabatos" abajo. Con **Compartir** se manda por WhatsApp o se guarda en Fotos (en iPhone, desde el menú de compartir: *Guardar imagen*); con **Guardar** se baja como archivo. Se arma en el teléfono, no se guarda en el servidor.
+- **Radio para dibujar.** En la pantalla de dibujar, el botón 🎵 abre una radio con 15 estilos: Lofi, Chill, Jazz, Clásica y piano, Para concentrarse, Lluvia y naturaleza, Bossa nova, Acústica, Baladas románticas, Pop latino, De Costa Rica, K-pop, Anime y J-pop, Videojuegos y Synthwave. Cada estilo tiene varias emisoras en vivo (el botón ⏭ cambia a otra). Solo suena mientras dibujas: al volver a Hoy o al terminar el dibujo, se apaga. Más detalles abajo, en **La radio**.
 - **Garabatito**, el lapicito de la casa. Vive en la pantalla de Hoy: flota, parpadea y en su globito cuenta cómo va el día ("¡Eli ya dibujó! Te está esperando 👀", "¡Eli te dejó una notita!"…). De noche se duerme. Si lo tocas, salta y dice alguna ocurrencia o un truquito de la app.
 
 ## Probarla en tu computadora
@@ -181,6 +182,17 @@ CREATE TABLE recordatorios (fecha TEXT PRIMARY KEY);  -- días en que ya salió 
 - Si Apple o Google responden que un aparato ya no existe (desinstalaron la app, quitaron el permiso), se borra de la tabla.
 - `recordatorios` solo guarda la última semana.
 
+## La radio
+
+- Son radios de internet públicas y gratuitas, en vivo (no es Spotify: no se eligen canciones). Salen de **[Radio Browser](https://www.radio-browser.info)**, un directorio libre de más de 60 000 emisoras, sin cuenta ni clave.
+- Las emisoras de cada estilo están escogidas a mano en `lib/radio.js` y probadas: todas por https, en MP3 o AAC (lo que suena en iPhone y Android). Se guarda el identificador de Radio Browser de cada una; el servidor le pregunta a la API su dirección actual y si está caída, así que si una radio se muda, la app se entera sola. Si a un estilo le quedan menos de 4, se completa buscando por etiqueta (sin noticias, deportes ni religión). Si Radio Browser no responde, se usan las direcciones guardadas.
+- Si una emisora no arranca en 12 segundos o se cae, la app salta sola a la siguiente del mismo estilo.
+- **El audio no pasa por Vercel**: el teléfono se conecta directo a cada emisora. Por eso la CSP ahora tiene `media-src https:` (solo deja sonar audio y video de sitios https; no permite ejecutar nada).
+- Se recuerdan el estilo, la emisora y el volumen en cada aparato, pero **nunca suena sola**: siempre con un toque. En iPhone/iPad el volumen se cambia con los botones del aparato (la barra no aparece).
+- En la pantalla bloqueada se ve "Garabatos · Radio Lofi" con play, pausa y siguiente.
+- **Datos móviles:** una emisora de 128 kbps gasta unos 55–60 MB por hora (las de 320 kbps, ~140 MB). Con wifi no importa.
+- Para cambiar emisoras: busca la radio en https://www.radio-browser.info, copia su identificador (el *stationuuid*, en la dirección de su página) y agrégala en `lib/radio.js` con su nombre y su dirección de stream.
+
 ## Reglas del día
 
 - El día cambia a medianoche, hora de Costa Rica (`zonaHoraria`).
@@ -206,6 +218,7 @@ lib/base.js          las tablas y las consultas
 lib/imagen.js        compresión con sharp
 lib/avisos.js        mandar avisos al teléfono (web-push)
 lib/reacciones.js    la lista de emojis para reaccionar
+lib/radio.js         los estilos y emisoras de la radio (Radio Browser)
 lib/temas.js         ~200 temas · lib/tema-del-dia.js: cuál toca hoy
 public/              lo que se ve en el teléfono
 public/js/lienzo.js  el lienzo: trazos, formas, borrador, deshacer, Pencil
@@ -213,8 +226,9 @@ public/js/avisos.js  el cuadrito de "Activar avisos"
 public/js/reacciones.js  pegatinas, notitas y el panel para reaccionar
 public/js/postal.js  arma la postal de los dos dibujos (canvas)
 public/js/mascota.js Garabatito
+public/js/radio.js   la radio de la pantalla de dibujar
 public/sw.js         muestra los avisos (no guarda nada en caché)
 scripts/probar.js    pruebas del servidor
 ```
 
-Las tipografías (Bagel Fat One y Mali, licencia SIL OFL) vienen incluidas en `public/fonts`. Los únicos servicios externos son los de avisos (Apple, Google o Mozilla, según el aparato; sin Firebase ni cuentas extra) y cron-job.org para el recordatorio, y la app funciona sin ellos.
+Las tipografías (Bagel Fat One y Mali, licencia SIL OFL) vienen incluidas en `public/fonts`. Los únicos servicios externos son los de avisos (Apple, Google o Mozilla, según el aparato; sin Firebase ni cuentas extra), cron-job.org para el recordatorio y, para la radio, Radio Browser y las propias emisoras. La app funciona sin ellos.

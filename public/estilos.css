@@ -1114,6 +1114,111 @@ button.polaroid:active { transform: rotate(0deg) scale(.97); }
 }
 @keyframes postal-llega { from { opacity: 0; transform: translateY(34px) rotate(4deg) scale(.88); } }
 
+/* ---------------------------------------------------------------- radio (pantalla de dibujar) */
+.radio-boton {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: var(--trazo);
+  border-radius: 50%;
+  background: var(--papel);
+  box-shadow: var(--sombra-chica);
+}
+.radio-boton[aria-expanded="true"] { background: var(--cielo); }
+.radio-boton.sonando, .radio-boton.cargando { background: var(--sol); }
+.radio-boton:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--tinta); }
+.radio-ondas { display: none; align-items: flex-end; gap: 3px; height: 18px; }
+.radio-ondas i { display: block; width: 4px; height: 100%; border-radius: 2px; background: var(--tinta); transform-origin: bottom; animation: onda .9s ease-in-out infinite; }
+.radio-ondas i:nth-child(2) { animation-delay: -.3s; }
+.radio-ondas i:nth-child(3) { animation-delay: -.6s; }
+.radio-boton.sonando .icono, .radio-boton.cargando .icono { display: none; }
+.radio-boton.sonando .radio-ondas, .radio-boton.cargando .radio-ondas { display: flex; }
+.radio-boton.cargando .radio-ondas i { animation-name: onda-espera; animation-duration: 1.2s; }
+@keyframes onda { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
+@keyframes onda-espera { 0%, 100% { transform: scaleY(.25); opacity: .45; } 50% { transform: scaleY(.5); opacity: 1; } }
+
+.radio {
+  position: fixed;
+  top: calc(var(--arriba) + 62px);
+  right: 12px;
+  z-index: 30;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100vh - var(--arriba) - 80px);
+  max-height: calc(100dvh - var(--arriba) - 80px);
+  overflow: auto;
+  padding: 12px 14px 10px;
+  border: var(--trazo);
+  border-radius: 22px;
+  background: var(--papel);
+  box-shadow: var(--sombra);
+  transform-origin: calc(100% - 100px) 0;
+  animation: radio-abre .24s cubic-bezier(.3, 1.4, .5, 1);
+}
+.radio[hidden] { display: none; }
+@keyframes radio-abre { from { opacity: 0; transform: translateY(-10px) scale(.93); } }
+.radio-titulo { display: flex; align-items: center; gap: .4em; margin: 0 0 .65rem; font-family: var(--display); font-size: 1.15rem; line-height: 1.1; }
+.radio-titulo .icono { color: var(--fresa); }
+
+.radio-estilos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.radio-estilo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-height: 54px;
+  padding: 5px 4px;
+  border: 2px solid var(--tinta);
+  border-radius: 14px;
+  background: #fff;
+  font-size: .74rem;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+  transition: transform .1s ease;
+}
+.radio-estilo-emoji { font-size: 1.25rem; line-height: 1.15; }
+.radio-estilo.activa { background: var(--sol); box-shadow: var(--sombra-chica); }
+.radio-estilo:active { transform: scale(.94); }
+.radio-cargando { grid-column: 1 / -1; margin: .4rem 0; font-size: .9rem; color: var(--tinta-2); text-align: center; }
+.radio-estilos .chip { grid-column: 1 / -1; justify-self: center; }
+
+.radio-reproductor { display: flex; align-items: center; gap: 10px; margin-top: .8rem; padding-top: .7rem; border-top: 2px dashed rgba(58, 39, 69, .25); }
+.radio-play {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border: var(--trazo);
+  border-radius: 50%;
+  background: var(--fresa);
+  box-shadow: var(--sombra-chica);
+}
+.radio-play:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--tinta); }
+.radio-info { flex: 1; min-width: 0; }
+.radio-emisora { margin: 0; overflow: hidden; font-family: var(--display); font-size: 1rem; line-height: 1.2; white-space: nowrap; text-overflow: ellipsis; }
+.radio-detalle { margin: .1rem 0 0; font-size: .8rem; line-height: 1.25; color: var(--tinta-2); }
+.radio-otra {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 2px solid var(--tinta);
+  border-radius: 50%;
+  background: #fff;
+}
+.radio-otra:disabled { opacity: .35; }
+.radio-volumen-fila { display: flex; align-items: center; gap: 8px; margin-top: .65rem; color: var(--tinta-2); }
+.radio-volumen { flex: 1; min-width: 0; accent-color: var(--fresa); }
+.radio-pie { margin: .55rem 0 0; font-size: .68rem; color: var(--tinta-2); text-align: center; }
+
 /* ---------------------------------------------------------------- menos movimiento */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

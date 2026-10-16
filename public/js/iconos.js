@@ -27,6 +27,11 @@ const TRAZOS = {
   enviar: '<path d="M5.5 15.5L26.5 6l-6.5 20.5-4.6-8.3z"/><path d="M15.4 18.2L26.5 6"/>',
   compartir: '<path d="M16 19V5.5M10.5 11L16 5.5l5.5 5.5"/><path d="M9.5 14.5H8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1.5"/>',
   postal: '<rect x="4.5" y="7.5" width="23" height="17" rx="3"/><path d="M17.5 12h6M17.5 16h6M17.5 20h4"/><rect x="8" y="11" width="6" height="7" rx="1"/>',
+  musica: '<path d="M12 23.5V8.5l13-3v15"/><circle cx="8.5" cy="23.5" r="3.5"/><circle cx="21.5" cy="20.5" r="3.5"/>',
+  play: '<path d="M10.5 6.5v19l15-9.5z" fill="currentColor"/>',
+  pausa: '<rect x="8.5" y="7" width="5" height="18" rx="1.5" fill="currentColor"/><rect x="18.5" y="7" width="5" height="18" rx="1.5" fill="currentColor"/>',
+  siguiente: '<path d="M6.5 7.5v17l12.5-8.5z" fill="currentColor"/><path d="M24.5 7.5v17"/>',
+  volumen: '<path d="M5.5 12.5h5l6-5v17l-6-5h-5z"/><path d="M21 12a5.5 5.5 0 0 1 0 8M24.5 9a10 10 0 0 1 0 14"/>',
   campana: '<path d="M8.5 22.5V15a7.5 7.5 0 0 1 15 0v7.5l2.2 2.7H6.3z"/><path d="M13.3 27.5a2.9 2.9 0 0 0 5.4 0"/><path d="M16 5V7.5"/>',
 };
 
