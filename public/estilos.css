@@ -752,8 +752,45 @@ button.polaroid:active { transform: rotate(0deg) scale(.97); }
 .herramienta:disabled { opacity: .35; box-shadow: none; }
 .herramienta-nombre { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-.paleta { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+.paleta { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+
+/* nombre del grupo de colores con sus puntitos (uno por grupo) */
+.paleta-nombre {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  font-size: .8rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--tinta-2);
+}
+.paleta-puntos { display: flex; gap: 4px; }
+.paleta-puntos i { display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--cielo-2); transition: background-color .15s, transform .15s; }
+.paleta-puntos i.activo { background: var(--tinta); transform: scale(1.3); }
+
+.paleta-fila { display: flex; align-items: stretch; gap: 6px; }
+.paleta-flecha {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  padding: 0;
+  border: 2px solid var(--tinta);
+  border-radius: 12px;
+  background: var(--cielo);
+  transition: transform .08s ease;
+}
+.paleta-flecha .icono { width: 1.1em; height: 1.1em; }
+.paleta-flecha.derecha .icono { transform: scaleX(-1); }
+.paleta-flecha:active { transform: scale(.9); background: var(--sol); }
+
 .colores { display: grid; flex: 1; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.colores.desde-der { animation: colores-der .24s ease-out; }
+.colores.desde-izq { animation: colores-izq .24s ease-out; }
+@keyframes colores-der { from { opacity: 0; transform: translateX(26px); } }
+@keyframes colores-izq { from { opacity: 0; transform: translateX(-26px); } }
 .color { display: grid; place-items: center; padding: 0; border: 0; background: none; }
 .color-punto {
   display: block;
@@ -766,22 +803,51 @@ button.polaroid:active { transform: rotate(0deg) scale(.97); }
 }
 .color.activa .color-punto { transform: scale(.78); box-shadow: 0 0 0 3px var(--papel), 0 0 0 5.5px var(--tinta); }
 
-.tamanos { display: flex; flex: none; flex-direction: column; gap: 6px; }
-.tamano {
-  display: grid;
-  place-items: center;
-  width: 52px;
+/* barra del tamaño del pincel: puntito chico · barra · bolita con el tamaño real */
+.pincel { display: flex; align-items: center; gap: 10px; padding: 0 2px; }
+.pincel-chico { display: block; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--tinta); }
+.pincel-barra {
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  margin: 0;
+  border: 2px solid var(--tinta);
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--fresa-2) var(--lleno, 50%), #fff var(--lleno, 50%));
+  -webkit-appearance: none;
+  appearance: none;
+}
+.pincel-barra::-webkit-slider-thumb {
+  width: 28px;
   height: 28px;
-  padding: 0;
-  border: var(--trazo);
-  border-radius: 12px;
+  border: 2.5px solid var(--tinta);
+  border-radius: 50%;
+  background: var(--sol);
+  box-shadow: var(--sombra-chica);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.pincel-barra::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border: 2.5px solid var(--tinta);
+  border-radius: 50%;
+  background: var(--sol);
+  box-shadow: var(--sombra-chica);
+}
+.pincel-barra:focus-visible { outline: 3px solid var(--fresa-2); outline-offset: 3px; }
+.pincel-muestra {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 2px dashed rgba(58, 39, 69, .35);
+  border-radius: 50%;
   background: #fff;
 }
-.tamano.activa { background: var(--sol); }
-.tamano-punto { display: block; border-radius: 50%; background: var(--tinta); }
-.tamano-punto.t-fina { width: 5px; height: 5px; }
-.tamano-punto.t-media { width: 10px; height: 10px; }
-.tamano-punto.t-gruesa { width: 17px; height: 17px; }
+.pincel-punto { display: block; border-radius: 50%; background: var(--tinta); box-shadow: 0 0 0 1px rgba(58, 39, 69, .25); }
+.pincel-punto.borrador { background: var(--papel); box-shadow: inset 0 0 0 1.5px var(--tinta); }
 
 .selector-formas {
   position: absolute;
@@ -825,9 +891,8 @@ button.polaroid:active { transform: rotate(0deg) scale(.97); }
   .dock { padding: 14px 24px calc(14px + var(--abajo)); }
   .herramienta { height: 58px; }
   .colores { grid-template-columns: repeat(12, 1fr); }
-  .tamanos { flex-direction: row; }
   .area-lienzo { padding: 12px 28px 22px; }
-  .paleta { margin-top: 14px; gap: 18px; }
+  .paleta { margin-top: 12px; gap: 8px; }
 }
 
 /* Pantalla ancha (iPad horizontal, computadora): herramientas en una columna */
@@ -854,10 +919,9 @@ button.polaroid:active { transform: rotate(0deg) scale(.97); }
   .herramienta { height: 66px; align-content: center; gap: 2px; padding: 4px 0; font-size: .75rem; }
   .herramienta.separada { margin-left: 0; }
   .herramienta-nombre { position: static; width: auto; height: auto; overflow: visible; clip: auto; font-size: .72rem; font-weight: 600; }
-  .paleta { flex-direction: column; align-items: stretch; margin-top: 16px; gap: 14px; }
+  .paleta { margin-top: 16px; gap: 10px; }
   .colores { grid-template-columns: repeat(4, 1fr); gap: 8px; }
-  .tamanos { flex-direction: row; justify-content: space-between; }
-  .tamano { flex: 1; width: auto; height: 36px; }
+  .paleta-flecha { width: 26px; }
 }
 
 /* ---------------------------------------------------------------- vida en Hoy */

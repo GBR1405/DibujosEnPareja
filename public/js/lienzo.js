@@ -14,8 +14,10 @@ const BORRADOR = { ancho: 900, alto: 1200 };   // lo que se guarda en este apara
 const PAPEL = '#fffdf7';
 const MAX_ENVIO = 2_400_000; // caracteres del data URL; el servidor acepta hasta 2.8 M
 
-export const GROSORES = { fina: 5, media: 12, gruesa: 26 };
-const FACTOR_BORRADOR = 2.4;
+// Grosor del pincel, en píxeles del lienzo interno (1200 de ancho). El borrador es más
+// ancho: FACTOR_BORRADOR veces el grosor elegido.
+export const GROSOR = { min: 2, max: 72, inicial: 12 };
+export const FACTOR_BORRADOR = 2.4;
 const GRACIA_LAPIZ_MS = 1500;
 
 const medio = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
@@ -172,7 +174,8 @@ export function crearLienzo(caja, { alCambiar } = {}) {
   const cv = vista.getContext('2d');
   const limpiarVista = () => cv.clearRect(0, 0, ANCHO, ALTO);
 
-  const estado = { herramienta: 'pluma', color: '#2b2220', grosor: 'media', forma: 'corazon', relleno: false };
+  const estado = { herramienta: 'pluma', color: '#2b2220', grosor: GROSOR.inicial, forma: 'corazon', relleno: false };
+  const grosor = () => Math.min(GROSOR.max, Math.max(GROSOR.min, Number(estado.grosor) || GROSOR.inicial));
   let ops = [];
   let rehacerPila = [];
   let imagenBase = null;
@@ -227,7 +230,7 @@ export function crearLienzo(caja, { alCambiar } = {}) {
       activo = { id: e.pointerId, tipo: 'forma', a: p, b: p };
     } else {
       const borrar = estado.herramienta === 'borrador';
-      const op = { t: 'trazo', color: borrar ? PAPEL : estado.color, size: GROSORES[estado.grosor], borrar, pts: [p] };
+      const op = { t: 'trazo', color: borrar ? PAPEL : estado.color, size: grosor(), borrar, pts: [p] };
       activo = { id: e.pointerId, tipo: 'trazo', op };
       estiloTrazo(ctx, op);
       punto(ctx, op);
@@ -244,7 +247,7 @@ export function crearLienzo(caja, { alCambiar } = {}) {
     if (activo.tipo === 'forma') {
       activo.b = puntoDe(lista[lista.length - 1]);
       limpiarVista();
-      pintarForma(cv, { forma: estado.forma, color: estado.color, size: GROSORES[estado.grosor], relleno: estado.relleno, a: activo.a, b: activo.b });
+      pintarForma(cv, { forma: estado.forma, color: estado.color, size: grosor(), relleno: estado.relleno, a: activo.a, b: activo.b });
       return;
     }
 
@@ -270,7 +273,7 @@ export function crearLienzo(caja, { alCambiar } = {}) {
       requestAnimationFrame(() => { if (!activo) limpiarVista(); });
       const largo = Math.hypot(a.b[0] - a.a[0], a.b[1] - a.a[1]);
       if (cancelado || largo < 12) return;
-      const op = { t: 'forma', forma: estado.forma, color: estado.color, size: GROSORES[estado.grosor], relleno: estado.relleno, a: a.a, b: a.b };
+      const op = { t: 'forma', forma: estado.forma, color: estado.color, size: grosor(), relleno: estado.relleno, a: a.a, b: a.b };
       pintarOp(ctx, op);
       confirmarOp(op);
       return;
@@ -352,6 +355,8 @@ export function crearLienzo(caja, { alCambiar } = {}) {
     exportarBorrador,
     cargarBase,
     ajustar,
+    // Cuántos píxeles de pantalla mide un píxel del lienzo (para mostrar el tamaño real del pincel).
+    escala: () => caja.getBoundingClientRect().width / ANCHO,
     destruir: () => observador.disconnect(),
   };
 }

@@ -1,7 +1,7 @@
 import { api, urlDibujo } from './api.js';
 import { h, aviso, hoja, confirmar, lluviaDeCorazones, descargar } from './ui.js';
 import { icono, carita } from './iconos.js';
-import { crearLienzo } from './lienzo.js';
+import { crearLienzo, GROSOR, FACTOR_BORRADOR } from './lienzo.js';
 import { controlAvisos, sincronizarAvisos, salirConAvisos } from './avisos.js';
 import { conocerReacciones, emojiDe, pegatina, repegar, burbuja, panelReaccion } from './reacciones.js';
 import { crearPostal, abrirPostal } from './postal.js';
@@ -432,13 +432,66 @@ async function pantallaHoy(cont, vigente) {
 }
 
 // ================================================================== dibujar
-const COLORES = [
-  ['negro', '#2b2220'], ['gris', '#8c8794'], ['café', '#8a5a3c'], ['piel', '#ffd0b5'],
-  ['rojo', '#e8424a'], ['naranja', '#ff8a3d'], ['amarillo', '#ffd23f'], ['verde', '#4cc26b'],
-  ['turquesa', '#3fd0c9'], ['azul', '#3d8bff'], ['morado', '#8f5cff'], ['rosa', '#ff7fb0'],
+// Cuatro grupos de 12 colores; con las flechas se pasa de uno a otro.
+const PALETAS = [
+  {
+    nombre: 'Normales',
+    colores: [
+      ['negro', '#2b2220'], ['gris', '#8c8794'], ['café', '#8a5a3c'], ['piel', '#ffd0b5'],
+      ['rojo', '#e8424a'], ['naranja', '#ff8a3d'], ['amarillo', '#ffd23f'], ['verde', '#4cc26b'],
+      ['turquesa', '#3fd0c9'], ['azul', '#3d8bff'], ['morado', '#8f5cff'], ['rosa', '#ff7fb0'],
+    ],
+  },
+  {
+    nombre: 'Suaves', // poco saturados: como de acuarela o de libro viejo
+    colores: [
+      ['gris pizarra', '#5b5866'], ['gris topo', '#a39a92'], ['arena', '#c9ad8b'], ['canela', '#b9805e'],
+      ['terracota', '#b65c4f'], ['mostaza', '#c9a24a'], ['amarillo pálido', '#ecdca2'], ['verde oliva', '#8a9a5b'],
+      ['verde salvia', '#9db89a'], ['azul grisáceo', '#7393ab'], ['malva', '#9d89ab'], ['rosa viejo', '#c98d98'],
+    ],
+  },
+  {
+    nombre: 'Vivos', // muy saturados
+    colores: [
+      ['rojo intenso', '#ff1a3c'], ['naranja fuego', '#ff6a00'], ['amarillo limón', '#ffe500'], ['verde lima', '#8cf000'],
+      ['verde fuerte', '#00b14f'], ['verde azulado', '#00a99d'], ['cian', '#00cfff'], ['azul eléctrico', '#0050ff'],
+      ['azul marino', '#1b2490'], ['violeta', '#8a00ff'], ['magenta', '#ff00c3'], ['carmesí', '#b0002d'],
+    ],
+  },
+  {
+    nombre: 'Pastel',
+    colores: [
+      ['rosa pastel', '#ffc2d6'], ['durazno', '#ffd1ad'], ['amarillo pastel', '#ffe88f'], ['pistacho', '#d6eda1'],
+      ['menta', '#b5efcf'], ['aqua', '#a9ebe6'], ['celeste', '#bfe2ff'], ['azul bebé', '#a8c6ff'],
+      ['lavanda', '#d5c5ff'], ['lila', '#ebb9f2'], ['coral pastel', '#ffb4a8'], ['gris perla', '#d4cfdd'],
+    ],
+  },
 ];
+const TODOS_LOS_COLORES = new Set(PALETAS.flatMap((p) => p.colores.map(([, hex]) => hex)));
 const FORMAS = [['linea', 'Línea'], ['circulo', 'Círculo'], ['cuadrado', 'Cuadrado'], ['triangulo', 'Triángulo'], ['corazon', 'Corazón'], ['estrella', 'Estrella']];
-const TAMANOS = [['fina', 'Fino'], ['media', 'Mediano'], ['gruesa', 'Grueso']];
+
+// El grupo de colores, el color y el tamaño del pincel se recuerdan en cada aparato.
+const CLAVE_PINCEL = 'garabatos-pincel';
+function pincelGuardado() {
+  let p = {};
+  try { p = JSON.parse(localStorage.getItem(CLAVE_PINCEL)) || {}; } catch { /* sin almacenamiento */ }
+  const grosor = Number(p.grosor);
+  return {
+    grupo: Number.isInteger(p.grupo) && p.grupo >= 0 && p.grupo < PALETAS.length ? p.grupo : 0,
+    color: TODOS_LOS_COLORES.has(p.color) ? p.color : null,
+    grosor: grosor >= GROSOR.min && grosor <= GROSOR.max ? grosor : GROSOR.inicial,
+  };
+}
+function guardarPincel(datos) {
+  try { localStorage.setItem(CLAVE_PINCEL, JSON.stringify(datos)); } catch { /* sin almacenamiento */ }
+}
+
+// La barra va de 0 a 100 pero el grosor crece en curva: así hay más control en los
+// tamaños finos (de 2 a 12 en la primera mitad) y aun así se llega a uno bien grueso.
+const RAZON = GROSOR.max / GROSOR.min;
+const grosorDeBarra = (v) => Math.round(GROSOR.min * RAZON ** (v / 100) * 10) / 10;
+const barraDeGrosor = (g) => Math.round((100 * Math.log(g / GROSOR.min)) / Math.log(RAZON));
+const nombreDeGrosor = (v) => (v < 22 ? 'muy fino' : v < 42 ? 'fino' : v < 60 ? 'mediano' : v < 80 ? 'grueso' : 'muy grueso');
 
 function cargarImagen(url) {
   return new Promise((ok, fallo) => {
@@ -515,12 +568,76 @@ async function pantallaDibujar(cont, vigente) {
       el.classList.toggle('activa', activo);
       el.setAttribute('aria-pressed', activo);
     }
-    for (const el of dock.querySelectorAll('.tamano')) {
-      const activo = el.dataset.tamano === e.grosor;
-      el.classList.toggle('activa', activo);
-      el.setAttribute('aria-pressed', activo);
+    actualizarPincel();
+  }
+
+  // ---- colores por grupos (con flechas) y barra del tamaño del pincel
+  const pincel = pincelGuardado();
+  let grupo = pincel.grupo;
+  const nombreGrupo = h('span', { class: 'paleta-nombre-texto' });
+  const puntitos = h('span', { class: 'paleta-puntos', 'aria-hidden': 'true' }, PALETAS.map(() => h('i')));
+  const coloresEl = h('div', { class: 'colores', role: 'group' });
+  const recordarPincel = () => guardarPincel({ grupo, color: lienzo.estado.color, grosor: lienzo.estado.grosor });
+
+  function elegirColor(hex) {
+    lienzo.estado.color = hex;
+    if (lienzo.estado.herramienta === 'borrador') lienzo.estado.herramienta = 'pluma';
+    actualizarHerramientas();
+    recordarPincel();
+  }
+
+  function pintarColores(paso = 0) {
+    const paleta = PALETAS[grupo];
+    nombreGrupo.textContent = paleta.nombre;
+    [...puntitos.children].forEach((p, i) => p.classList.toggle('activo', i === grupo));
+    coloresEl.setAttribute('aria-label', `Colores ${paleta.nombre.toLowerCase()}`);
+    coloresEl.replaceChildren(...paleta.colores.map(([nombre, hex]) => h('button', {
+      type: 'button', class: 'color', 'data-color': hex, style: { '--tono': hex }, 'aria-label': nombre, title: nombre,
+      onclick: () => elegirColor(hex),
+    }, h('span', { class: 'color-punto' }))));
+    if (paso) {
+      coloresEl.classList.remove('desde-izq', 'desde-der');
+      void coloresEl.offsetWidth;
+      coloresEl.classList.add(paso > 0 ? 'desde-der' : 'desde-izq');
     }
   }
+
+  function cambiarGrupo(paso) {
+    grupo = (grupo + paso + PALETAS.length) % PALETAS.length;
+    pintarColores(paso);
+    actualizarHerramientas();
+    recordarPincel();
+  }
+
+  const flechaColores = (paso, nombre) => h('button', {
+    type: 'button', class: `paleta-flecha ${paso > 0 ? 'derecha' : ''}`, 'aria-label': nombre, title: nombre, onclick: () => cambiarGrupo(paso),
+  }, icono('volver'));
+
+  const barraPincel = h('input', {
+    type: 'range', class: 'pincel-barra', min: '0', max: '100', step: '1', 'aria-label': 'Tamaño del pincel',
+    oninput: (e) => { lienzo.estado.grosor = grosorDeBarra(Number(e.target.value)); actualizarPincel(); },
+    onchange: () => recordarPincel(),
+  });
+  const puntoPincel = h('span', { class: 'pincel-punto' });
+
+  // La bolita de la derecha muestra el tamaño real del trazo en la pantalla, en su color.
+  function actualizarPincel() {
+    if (!lienzo) return;
+    const e = lienzo.estado;
+    const borrar = e.herramienta === 'borrador';
+    const valor = barraDeGrosor(e.grosor);
+    if (Number(barraPincel.value) !== valor) barraPincel.value = String(valor);
+    barraPincel.style.setProperty('--lleno', `${valor}%`);
+    barraPincel.setAttribute('aria-valuetext', nombreDeGrosor(valor));
+    const enPantalla = e.grosor * (borrar ? FACTOR_BORRADOR : 1) * (lienzo.escala() || 0.3);
+    const diametro = `${Math.max(3, Math.min(40, enPantalla))}px`;
+    puntoPincel.style.width = diametro;
+    puntoPincel.style.height = diametro;
+    puntoPincel.style.background = borrar ? '' : e.color;
+    puntoPincel.classList.toggle('borrador', borrar);
+  }
+
+  pintarColores();
 
   const dock = h('div', { class: 'dock' },
     h('div', { class: 'herramientas' },
@@ -535,18 +652,13 @@ async function pantallaDibujar(cont, vigente) {
         if (si) lienzo.limpiar();
       }, { clase: 'accion' })),
     h('div', { class: 'paleta' },
-      h('div', { class: 'colores', role: 'group', 'aria-label': 'Colores' }, COLORES.map(([nombre, hex]) => h('button', {
-        type: 'button', class: 'color', 'data-color': hex, style: { '--tono': hex }, 'aria-label': nombre, title: nombre,
-        onclick: () => {
-          lienzo.estado.color = hex;
-          if (lienzo.estado.herramienta === 'borrador') lienzo.estado.herramienta = 'pluma';
-          actualizarHerramientas();
-        },
-      }, h('span', { class: 'color-punto' })))),
-      h('div', { class: 'tamanos', role: 'group', 'aria-label': 'Grosor' }, TAMANOS.map(([id, nombre]) => h('button', {
-        type: 'button', class: 'tamano', 'data-tamano': id, 'aria-label': nombre, title: nombre,
-        onclick: () => { lienzo.estado.grosor = id; actualizarHerramientas(); },
-      }, h('span', { class: `tamano-punto t-${id}` }))))));
+      h('p', { class: 'paleta-nombre', 'aria-live': 'polite' }, nombreGrupo, puntitos),
+      h('div', { class: 'paleta-fila' },
+        flechaColores(-1, 'Colores anteriores'), coloresEl, flechaColores(1, 'Más colores')),
+      h('div', { class: 'pincel' },
+        h('span', { class: 'pincel-chico', 'aria-hidden': 'true' }),
+        barraPincel,
+        h('span', { class: 'pincel-muestra', 'aria-hidden': 'true' }, puntoPincel))));
 
   const botonTerminar = h('button', { type: 'button', class: 'boton fresa chico', onclick: pedirTerminar }, icono('check'), 'Terminar');
   // La radio vive solo en esta pantalla: al salir (o al terminar) se apaga.
@@ -572,7 +684,11 @@ async function pantallaDibujar(cont, vigente) {
   });
   botones.deshacer.disabled = true;
   botones.rehacer.disabled = true;
+  lienzo.estado.grosor = pincel.grosor;
+  if (pincel.color) lienzo.estado.color = pincel.color;
   actualizarHerramientas();
+  // Si la pantalla gira, el lienzo cambia de tamaño y la bolita del pincel también.
+  window.addEventListener('resize', actualizarPincel);
 
   // ---- borrador en este aparato (no viaja a internet hasta que pulsas "Terminar")
   function programarGuardado() {
@@ -599,7 +715,7 @@ async function pantallaDibujar(cont, vigente) {
     const guardado = JSON.parse(localStorage.getItem(claveLocal) || 'null');
     if (guardado?.img) {
       const img = await cargarImagen(guardado.img);
-      if (!vigente()) { radio.destruir(); return undefined; }
+      if (!vigente()) { radio.destruir(); window.removeEventListener('resize', actualizarPincel); return undefined; }
       lienzo.cargarBase(img);
     }
   } catch { /* se empieza en blanco */ }
@@ -643,6 +759,7 @@ async function pantallaDibujar(cont, vigente) {
   return () => {
     document.removeEventListener('visibilitychange', alOcultar);
     window.removeEventListener('pagehide', guardarLocal);
+    window.removeEventListener('resize', actualizarPincel);
     cerrarSelector();
     guardarLocal();
     lienzo.destruir();
