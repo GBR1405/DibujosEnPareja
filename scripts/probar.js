@@ -388,6 +388,17 @@ function servidorAparte(env) {
     assert.deepEqual(sinApi.find((e) => e.id === 'lofi').emisoras.map((x) => x.url), ESTILOS.find((e) => e.id === 'lofi').emisoras.map(([, , url]) => url)); paso('si Radio Browser no responde, suenan las emisoras guardadas');
     assert.match((await pedir('GET', '/api/radio', { cookie: A.cookie })).cabeceras.get('content-security-policy'), /media-src https:/); paso("la CSP deja sonar audio de las emisoras (media-src https:) y nada más cambia");
 
+    console.log('Versión publicada');
+    const v1 = await pedir('GET', '/api/version');
+    const v2 = await pedir('GET', '/api/version');
+    assert.equal(v1.estado, 200);
+    assert.match(v1.datos.version, /^[0-9a-f]{12}$/);
+    assert.equal(v1.datos.version, v2.datos.version);
+    assert.equal(v1.cabeceras.get('cache-control'), 'no-store'); paso(`la app puede preguntar qué versión hay publicada (${v1.datos.version}), sin sesión y sin caché`);
+    const portada = await pedir('GET', '/');
+    assert.equal(portada.cabeceras.get('etag'), null);
+    assert.equal(portada.cabeceras.get('cache-control'), 'no-cache'); paso('la portada no se queda pegada en una versión vieja (sin ETag por fecha)');
+
     console.log('Protección de PIN');
     for (let i = 0; i < 5; i += 1) await entrar('dos', '000000');
     assert.equal((await entrar('dos', '222222')).estado, 429); paso('tras 5 fallos se bloquea un rato');

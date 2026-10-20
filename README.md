@@ -73,6 +73,8 @@ No hace falta crear la tabla: la app la crea sola la primera vez.
 
 4. **Deploy**. Si cambias variables después, hay que volver a desplegar.
 
+Cuando publicas cambios, la app instalada se actualiza sola la próxima vez que la abran: se recarga y dice "¡Garabatos se actualizó! ✨". Si en ese momento están dibujando, espera a que salgan de esa pantalla (el borrador no se pierde). Esto existe porque en iPhone la app instalada puede quedarse "dormida" en memoria con la versión vieja.
+
 Si falta `TURSO_DATABASE_URL`, la app avisa con un error claro en vez de guardar en un disco que se borra. Si faltan las `VAPID_…` (o están mal copiadas), la app funciona normal, solo que sin avisos.
 
 Las claves VAPID se generan **una sola vez**. Si las cambias después, los aparatos que ya tenían avisos dejan de recibirlos hasta que se abra la app otra vez (ahí se vuelven a registrar solos).

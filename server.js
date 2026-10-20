@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
@@ -233,6 +234,32 @@ app.use('/api', async (req, res, next) => {
 const fechaPermitida = (fecha, h) => F.esFecha(fecha)
   && (fecha === h || (fecha === F.sumarDias(h, -1) && F.anioDe(fecha) === F.anioDe(h)));
 
+// La versión de lo que se ve en el teléfono: una huella de los archivos de public/
+// (cambia con cada cambio publicado). La app la compara al volver a abrirse y, si hay
+// una nueva, se recarga sola: en iPhone la app instalada puede quedarse "dormida" en
+// memoria con el código viejo por días.
+const VERSION = (() => {
+  try {
+    const huella = crypto.createHash('sha1');
+    const recorrer = (carpeta) => {
+      for (const f of fs.readdirSync(carpeta, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        const ruta = path.join(carpeta, f.name);
+        if (f.isDirectory()) recorrer(ruta);
+        else if (/\.(js|css|html|webmanifest)$/.test(f.name)) huella.update(f.name).update(fs.readFileSync(ruta));
+      }
+    };
+    recorrer(path.join(__dirname, 'public'));
+    return huella.digest('hex').slice(0, 12);
+  } catch {
+    return (process.env.VERCEL_GIT_COMMIT_SHA || 'local').slice(0, 12);
+  }
+})();
+
+app.get('/api/version', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ version: VERSION });
+});
+
 app.get('/api/cuentas', (req, res) => {
   res.json({
     nombreApp: config.nombreApp,
@@ -449,6 +476,11 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'no_existe' }));
 // ---------------------------------------------------------------- archivos
 // En tu computadora los sirve Express; en Vercel los sirve su CDN desde public/.
 app.use(express.static(path.join(__dirname, 'public'), {
+  // Sin ETag ni Last-Modified: en Vercel los archivos de la función tienen todos la misma
+  // fecha (2018), así que un index.html nuevo del mismo tamaño se vería "igual" (304) y el
+  // navegador se quedaría con el viejo. Son archivos chiquitos: mejor bajarlos siempre.
+  etag: false,
+  lastModified: false,
   // sw.js (el que muestra los avisos) va siempre con no-cache, para que el navegador
   // revise si cambió cada vez que se abre la app.
   setHeaders(res, archivo) {

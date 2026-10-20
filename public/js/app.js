@@ -934,8 +934,45 @@ async function pantallaCalendario(cont, vigente) {
   };
 }
 
+// ================================================================== versión nueva
+// En iPhone, la app instalada puede quedarse "dormida" en memoria con el código viejo:
+// al tocar el ícono vuelve tal como estaba, sin bajar nada nuevo. Por eso, al volver a
+// abrirla (y al cambiar de pantalla) se pregunta al servidor qué versión hay publicada;
+// si cambió, la página se recarga sola. Mientras dibujas no: espera a que salgas.
+const AVISO_ACTUALIZADA = 'garabatos-actualizada';
+let versionCargada = null;
+let hayVersionNueva = false;
+let ultimaRevision = 0;
+
+function recargarSiToca() {
+  if (!hayVersionNueva || location.hash === '#/dibujar') return false;
+  try { sessionStorage.setItem(AVISO_ACTUALIZADA, '1'); } catch { /* sin almacenamiento */ }
+  location.reload();
+  return true;
+}
+
+async function revisarVersion({ ya = false } = {}) {
+  if (!ya && Date.now() - ultimaRevision < 30_000) return;
+  ultimaRevision = Date.now();
+  try {
+    const { version } = await api.version();
+    if (!versionCargada) versionCargada = version;
+    else if (version !== versionCargada) { hayVersionNueva = true; recargarSiToca(); }
+  } catch { /* sin conexión: se revisa la próxima vez */ }
+}
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden) revisarVersion({ ya: true }); });
+try {
+  if (sessionStorage.getItem(AVISO_ACTUALIZADA)) {
+    sessionStorage.removeItem(AVISO_ACTUALIZADA);
+    setTimeout(() => aviso('¡Garabatos se actualizó! ✨'), 700);
+  }
+} catch { /* sin almacenamiento */ }
+
 // ================================================================== router
 async function ir() {
+  if (recargarSiToca()) return;
+  revisarVersion();
   generacion += 1;
   const mia = generacion;
   const vigente = () => mia === generacion;

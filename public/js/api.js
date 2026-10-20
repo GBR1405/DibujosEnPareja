@@ -18,6 +18,7 @@ async function pedir(metodo, ruta, cuerpo) {
 }
 
 export const api = {
+  version: () => pedir('GET', '/api/version'),
   cuentas: () => pedir('GET', '/api/cuentas'),
   entrar: (id, pin) => pedir('POST', '/api/entrar', { id, pin }),
   salir: (endpoint) => pedir('POST', '/api/salir', endpoint ? { endpoint } : undefined),
