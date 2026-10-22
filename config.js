@@ -40,6 +40,15 @@ module.exports = {
   // (cabecera Authorization: Bearer <CRON_SECRET>). Sin ella, el recordatorio no funciona.
   cronSecreto: process.env.CRON_SECRET || '',
 
+  // Comodines, por si a alguien se le pasa un día: cada quien tiene hasta `maximo`, se
+  // recarga `porMes` el día 1 de cada mes, y sirven para dibujar un día de los últimos
+  // `diasAtras` días (así no se pierde la racha).
+  comodines: { maximo: 2, porMes: 1, diasAtras: 7 },
+
+  // El dibujo de ayer se puede terminar gratis hasta esta hora de hoy (por si la
+  // medianoche te agarró dibujando). Después, recuperarlo cuesta un comodín.
+  horasDeGracia: 3,
+
   // Al empezar un año nuevo se borran todos los dibujos del año anterior.
   // Ponlo en false si prefieren que se queden guardados en la base de datos.
   borrarAlEmpezarAnio: true,

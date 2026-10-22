@@ -29,6 +29,9 @@ const { base } = server;
 const F = require('../lib/fecha');
 const { temaDelDia } = require('../lib/tema-del-dia');
 const config = require('../config');
+// Las pruebas de antes de los comodines asumen que "ayer" se puede terminar a cualquier
+// hora; la hora de gracia y los comodines se prueban aparte, más abajo.
+config.horasDeGracia = 24;
 
 let ok = 0;
 const paso = (nombre) => { ok += 1; console.log(`  ✓ ${nombre}`); };
@@ -387,6 +390,101 @@ function servidorAparte(env) {
     const sinApi = (await pedir('GET', '/api/radio', { cookie: A.cookie })).datos.estilos;
     assert.deepEqual(sinApi.find((e) => e.id === 'lofi').emisoras.map((x) => x.url), ESTILOS.find((e) => e.id === 'lofi').emisoras.map(([, , url]) => url)); paso('si Radio Browser no responde, suenan las emisoras guardadas');
     assert.match((await pedir('GET', '/api/radio', { cookie: A.cookie })).cabeceras.get('content-security-policy'), /media-src https:/); paso("la CSP deja sonar audio de las emisoras (media-src https:) y nada más cambia");
+
+    console.log('Comodines');
+    const { saldo, siguienteMes } = require('../lib/comodines');
+    assert.deepEqual(
+      [saldo([], '2026-10'), saldo(['2026-10', '2026-10'], '2026-10'), saldo(['2026-10', '2026-10'], '2026-11'), saldo(['2026-10', '2026-10'], '2026-12'),
+        saldo(['2026-10', '2026-10', '2026-11'], '2026-11'), saldo(['2026-12', '2026-12'], '2027-01')],
+      [2, 0, 1, 2, 0, 1],
+    ); paso('empiezan con 2, cada mes se recarga 1 y nunca hay más de 2');
+    const hace = (n) => F.sumarDias(hoy, -n);
+    if (F.anioDe(hace(8)) !== F.anioDe(hoy)) {
+      console.log('  (se saltan las demás: la semana cruza el año nuevo)');
+    } else {
+      config.horasDeGracia = 0; // ya pasó la hora de gracia: ayer también cuesta un comodín
+      // La pareja empezó hace 6 días; B dibujó hace 2 días y A no.
+      await base.insertarCrudo({ fecha: hace(6), quien: 'dos', imagen: Buffer.from('x'), mini: Buffer.from('y') });
+      await base.insertarCrudo({ fecha: hace(2), quien: 'dos', imagen: Buffer.from('x'), mini: Buffer.from('y') });
+      const estado = async (cookie) => (await pedir('GET', '/api/hoy', { cookie })).datos;
+      let eA = await estado(A.cookie);
+      assert.deepEqual(eA.comodines, { quedan: 2, maximo: 2, proximo: null });
+      assert.deepEqual(eA.perdidos.map((p) => p.fecha), [hace(2), hace(3), hace(4), hace(5), hace(6)]);
+      assert.ok(eA.perdidos.every((p) => p.tema === temaDelDia(p.fecha) && p.gratis === false));
+      paso('cada quien ve sus comodines y los días que se le pasaron (de la última semana, desde que empezaron)');
+      const terminar = (cookie, fecha, comodin) => pedir('POST', '/api/terminar', { cookie, cuerpo: { fecha, imagen: png, ...(comodin ? { comodin: true } : {}) } });
+      assert.equal((await terminar(A.cookie, hace(2))).estado, 400); paso('sin pedir el comodín, un día pasado no se acepta (como antes)');
+      const rachaAntes = eA.racha;
+      intentos.length = 0;
+      const recuperado = await terminar(A.cookie, hace(2), true);
+      assert.deepEqual([recuperado.estado, recuperado.datos.comodines], [200, 1]);
+      eA = await estado(A.cookie);
+      assert.deepEqual([eA.comodines.quedan, eA.comodines.proximo], [1, `${siguienteMes(hoy.slice(0, 7))}-01`]);
+      assert.ok(!eA.perdidos.some((p) => p.fecha === hace(2)));
+      assert.equal(eA.racha, rachaAntes + 1); paso(`recuperar un día gasta 1 comodín y salva la racha (${rachaAntes} → ${eA.racha} días)`);
+      assert.deepEqual(intentos.map((i) => [i.endpoint, i.titulo]), [[EP('dos-telefono'), `${gabri} recuperó su dibujo del ${F.fechaCorta(hace(2))} 🎟️`]]); paso(`y le avisa a la pareja: "${intentos[0].titulo}"`);
+      assert.equal((await terminar(A.cookie, hace(3), true)).datos.comodines, 0);
+      const sinComodines = await terminar(A.cookie, hace(4), true);
+      assert.deepEqual([sinComodines.estado, sinComodines.datos.error], [403, 'sin_comodines']);
+      assert.ok((await estado(A.cookie)).perdidos.some((p) => p.fecha === hace(4))); paso('con 0 comodines ya no se puede (y el día sigue pendiente, sin gastar nada)');
+      assert.equal((await estado(B.cookie)).comodines.quedan, 2); paso('los comodines de cada quien son aparte');
+      assert.equal((await terminar(B.cookie, hace(8), true)).estado, 400);
+      assert.equal((await terminar(B.cookie, hace(7), true)).estado, 400); paso('no se recupera un día de hace más de una semana, ni de antes de que empezaran');
+      assert.equal((await terminar(B.cookie, hace(3), true)).estado, 200);
+      assert.equal((await terminar(B.cookie, hace(3), true)).estado, 409);
+      assert.equal((await estado(B.cookie)).comodines.quedan, 1); paso('mandar dos veces el mismo día no gasta dos comodines');
+      config.horasDeGracia = 24; // todavía es de madrugada: ayer es gratis
+      await base.borrarDibujo({ fecha: ayer, quien: 'uno' });
+      const deAyerGratis = (await estado(A.cookie)).perdidos.find((p) => p.fecha === ayer);
+      assert.ok(deAyerGratis && deAyerGratis.gratis);
+      assert.equal((await terminar(A.cookie, ayer)).estado, 200);
+      assert.equal((await estado(A.cookie)).comodines.quedan, 0); paso('en la hora de gracia, el de ayer es gratis (no gasta comodín)');
+      const diaRecuperado = (await pedir('GET', `/api/mes/${hace(2).slice(0, 7)}`, { cookie: B.cookie })).datos.dias.find((d) => d.fecha === hace(2));
+      assert.deepEqual([diaRecuperado.yo.recuperado, diaRecuperado.pareja.recuperado], [false, true]); paso('el calendario marca los dibujos recuperados con comodín');
+    }
+
+    console.log('Balde (relleno)');
+    // balde.js es un módulo del navegador sin dependencias: se carga tal cual.
+    const fuenteBalde = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'balde.js'), 'utf8');
+    const { rellenar, hexARgb } = await import(`data:text/javascript,${encodeURIComponent(fuenteBalde)}`);
+    const PAPEL_RGB = hexARgb('#fffdf7');
+    async function escena(interior, ancho = 400, alto = 400) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${ancho}" height="${alto}"><rect width="100%" height="100%" fill="#fffdf7"/>${interior}</svg>`;
+      const { data, info } = await sharp(Buffer.from(svg)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      return { data: new Uint8ClampedArray(data), width: info.width, height: info.height };
+    }
+    const pixel = (im, x, y) => { const p = (y * im.width + x) * 4; return [im.data[p], im.data[p + 1], im.data[p + 2]]; };
+    const parecido = (a, b, t = 3) => a.every((v, i) => Math.abs(v - b[i]) <= t);
+    const ROJO = hexARgb('#e8424a');
+    const AZUL = hexARgb('#3d8bff');
+    const CIRCULO = '<circle cx="200" cy="200" r="120" fill="none" stroke="#2b2220" stroke-width="6"/>';
+
+    let im = await escena(CIRCULO);
+    rellenar(im, 200, 200, ROJO);
+    assert.ok(parecido(pixel(im, 200, 200), ROJO) && parecido(pixel(im, 10, 10), PAPEL_RGB) && parecido(pixel(im, 200, 340), PAPEL_RGB)); paso('el balde rellena una figura cerrada y no se sale');
+    assert.ok(Math.max(...pixel(im, 320, 200)) < 90, `la línea quedó ${pixel(im, 320, 200)}`);
+    let orillaBlanca = 0;
+    for (let x = 200; x < 316; x += 1) { const c = pixel(im, x, 200); if (c[0] > 200 && c[1] > 120 && c[2] > 120) orillaBlanca += 1; }
+    assert.equal(orillaBlanca, 0); paso('no borra la línea ni deja orillita blanca junto a ella');
+    im = await escena('<path d="M 200 80 A 120 120 0 1 1 196 80.07" fill="none" stroke="#2b2220" stroke-width="6"/>');
+    rellenar(im, 200, 200, ROJO);
+    assert.ok(parecido(pixel(im, 200, 200), ROJO) && parecido(pixel(im, 10, 10), PAPEL_RGB)); paso('si la figura quedó con un huequito, no se escapa por ahí');
+    for (const pastel of ['#ffe88f', '#d4cfdd']) {
+      im = await escena(`<path d="M 0 0 L 400 400" stroke="${pastel}" stroke-width="2"/>`);
+      rellenar(im, 300, 60, AZUL);
+      assert.ok(parecido(pixel(im, 300, 60), AZUL) && parecido(pixel(im, 60, 300), PAPEL_RGB), pastel);
+    }
+    paso('respeta hasta las líneas finitas de colores clarísimos (pastel)');
+    im = await escena(CIRCULO);
+    rellenar(im, 200, 200, ROJO);
+    rellenar(im, 200, 200, AZUL);
+    assert.ok(parecido(pixel(im, 200, 200), AZUL) && parecido(pixel(im, 250, 260), AZUL)); paso('rellenar encima reemplaza el color (no lo mezcla)');
+    assert.equal(rellenar(im, 200, 200, AZUL), null); paso('rellenar con el mismo color no cambia nada (no se guarda un paso vacío)');
+    im = await escena('<circle cx="600" cy="800" r="400" fill="none" stroke="#2b2220" stroke-width="12"/>', 1200, 1600);
+    const inicioBalde = Date.now();
+    rellenar(im, 600, 800, ROJO);
+    const msBalde = Date.now() - inicioBalde;
+    assert.ok(msBalde < 1500, `tardó ${msBalde} ms`); paso(`en el lienzo de tamaño real tarda ${msBalde} ms`);
 
     console.log('Versión publicada');
     const v1 = await pedir('GET', '/api/version');

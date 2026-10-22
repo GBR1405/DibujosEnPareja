@@ -6,6 +6,8 @@ Cada día aparece un tema sencillo y al azar. Cada quien dibuja en su lienzo y l
 
 Además:
 
+- **Comodines 🎟️.** Por si a alguien se le pasa un día: cada quien tiene hasta **2 comodines**, y el día 1 de cada mes se le recarga **1** (nunca más de 2). Con un comodín se puede dibujar un día que se te pasó, de la última semana, y así **la racha no se rompe**. En Hoy aparece una tarjeta con los días que se te pasaron (y también desde el calendario, al abrir ese día); antes de gastar, la app pregunta. A la pareja le llega un aviso, y en el calendario se ve qué dibujos se recuperaron con comodín.
+- **Pincel o balde.** El primer botón de las herramientas abre dos opciones: **Pincel** (trazos a mano) y **Balde** (toca una zona y se rellena con el color elegido). El balde se detiene en las líneas, incluso en las finitas de colores pastel; si una figura hecha a mano quedó con un huequito chico, no se escapa por ahí; y no deja la orillita blanca junto a la línea ni la borra. Si se toca encima de una línea, la recolorea. Deshacer y rehacer funcionan igual que con los trazos.
 - **Colores y pincel.** Al dibujar hay 4 grupos de 12 colores: **Normales**, **Suaves** (poco saturados: terracota, mostaza, amarillo pálido, verde oliva…), **Vivos** (muy saturados: verde fuerte, cian, magenta…) y **Pastel**. Se cambia de grupo con las flechitas ‹ ›. El tamaño del pincel (y del borrador) se elige con una barra; la bolita de al lado muestra el tamaño real del trazo, en su color. El grupo, el color y el tamaño se recuerdan en cada aparato.
 - **Reacciones y notitas.** Al dibujo de tu pareja le puedes poner una reacción (❤️ 🥰 😍 😮 😂 🥺 🌟 👏) y dejarle una notita cortita (hasta 120 letras). La reacción aparece como una pegatina en la esquina de su polaroid y la notita como un globito con tu carita. Se puede cambiar o quitar cuando quieras, en Hoy o desde el calendario. Si tiene los avisos activados, le llega uno.
 - **Postal de los dos.** El botón **Postal de los dos** arma una imagen con los dos dibujos del día, como en la app: el tema en su cartelito, la fecha, las polaroids con nombre y carita, las reacciones, las notitas y "garabatos" abajo. Con **Compartir** se manda por WhatsApp o se guarda en Fotos (en iPhone, desde el menú de compartir: *Guardar imagen*); con **Guardar** se baja como archivo. Se arma en el teléfono, no se guarda en el servidor.
@@ -168,6 +170,18 @@ CREATE TABLE reacciones (
 - Si se quitan el emoji y la notita, la fila se borra. En año nuevo se borran junto con los dibujos.
 - Para cambiar los emojis, edita `lib/reacciones.js` (la app recibe la lista del servidor). Se guarda el `id`, así que puedes cambiar el emoji o el nombre sin perder nada.
 
+Los comodines usados se anotan en otra tablita (se crea sola). El saldo no se guarda: se calcula desde estas anotaciones (empieza en 2, +1 cada mes, máximo 2), así nunca se desincroniza:
+
+```sql
+CREATE TABLE comodines (
+  fecha TEXT NOT NULL,   -- el día que se recuperó
+  quien TEXT NOT NULL,   -- 'uno' o 'dos'
+  mes   TEXT NOT NULL,   -- '2026-10': el mes en que se usó
+  usado TEXT NOT NULL,
+  PRIMARY KEY (fecha, quien)
+);
+```
+
 Y dos tablas nuevas, muy pequeñas, para los avisos (también se crean solas):
 
 ```sql
@@ -199,7 +213,8 @@ CREATE TABLE recordatorios (fecha TEXT PRIMARY KEY);  -- días en que ya salió 
 ## Reglas del día
 
 - El día cambia a medianoche, hora de Costa Rica (`zonaHoraria`).
-- Se puede terminar el dibujo de hoy, o el de ayer si la medianoche te agarró dibujando.
+- Se puede terminar el dibujo de hoy. El de ayer, gratis hasta las **3:00 a. m.** (por si la medianoche te agarró dibujando; `horasDeGracia` en `config.js`). Después de esa hora, o para otro día de la última semana, hace falta un **comodín**.
+- Comodines: hasta 2 por persona, se recarga 1 cada mes (`comodines` en `config.js`). Solo sirven para días de este año y desde que la pareja empezó a usar la app.
 - El dibujo de la otra persona no se entrega (403) hasta que tú hayas terminado el de ese día.
 - El **borrador** (mientras dibujas) se guarda solo en el aparato, no en el servidor: si empiezas en el teléfono y sigues en el iPad, no lo verás.
 
@@ -222,6 +237,7 @@ lib/imagen.js        compresión con sharp
 lib/avisos.js        mandar avisos al teléfono (web-push)
 lib/reacciones.js    la lista de emojis para reaccionar
 lib/radio.js         los estilos y emisoras de la radio (Radio Browser)
+lib/comodines.js     el saldo de comodines (2 como máximo, +1 cada mes)
 lib/temas.js         ~200 temas · lib/tema-del-dia.js: cuál toca hoy
 public/              lo que se ve en el teléfono
 public/js/lienzo.js  el lienzo: trazos, formas, borrador, deshacer, Pencil

@@ -310,10 +310,67 @@ function queDiceGarabatito(d) {
   if (!d.parejaV) return { texto: deHoy([`¡Te quedó precioso! Ahora a esperar a ${p} ⏳`, `Guardadito. Cuando ${p} termine, aparece aquí ✨`]), animo: 'feliz' };
   if (notaMia && notaMia.comentario) return { texto: `¡${p} te dejó una notita! Mírala abajo 💌`, animo: 'feliz' };
   if (notaMia && notaMia.reaccion) return { texto: `¡${p} reaccionó a tu dibujo! ${emojiDe(notaMia.reaccion) || ''}`, animo: 'feliz' };
+  const recuperable = (d.perdidos || []).find((x) => x.gratis || (d.comodines && d.comodines.quedan > 0));
+  if (recuperable) {
+    return recuperable.gratis
+      ? { texto: `¡El de ayer todavía es gratis hasta las ${d.horasDeGracia}:00! Corre a dibujarlo 🏃`, animo: 'normal' }
+      : { texto: `Se te pasó ${nombreCortoDia(recuperable.fecha, d.fecha).toLowerCase()} 😿 ¡Recupéralo con un comodín y la racha sigue! 🎟️`, animo: 'normal' };
+  }
   if (!(d.notas && d.notas.suyo)) return { texto: `¿Qué te pareció el de ${p}? Déjale una reacción 💛`, animo: 'normal' };
   if (hora >= 22 || hora < 5) return { texto: 'Buenas noches… mañana dibujamos otra vez 🌙', animo: 'dormido' };
   if ([7, 14, 30, 50, 100, 200, 300, 365].includes(d.racha)) return { texto: `¡${d.racha} días seguidos dibujando juntos! Son increíbles 🏆`, animo: 'feliz' };
   return { texto: deHoy(['¡Qué lindos les quedaron! Mañana más 🌈', '¡Otro día para el álbum! Pueden guardar la postal 📮', 'Hoy vi dos obras de arte 🖼️']), animo: 'feliz' };
+}
+
+// ================================================================== comodines
+const comodinesTexto = (n) => (n === 1 ? '1 comodín' : `${n} comodines`);
+const teQuedan = (n) => (n === 1 ? 'Te queda 1' : `Te quedan ${n}`);
+const fechaCorta = (fecha) => `${partes(fecha)[2]} de ${MESES[partes(fecha)[1] - 1]}`;
+// Cuántos días antes de `hoy` es `fecha`.
+function diasAntes(fecha, hoy) {
+  const [a1, m1, d1] = partes(fecha);
+  const [a2, m2, d2] = partes(hoy);
+  return Math.round((Date.UTC(a2, m2 - 1, d2) - Date.UTC(a1, m1 - 1, d1)) / 86400000);
+}
+const nombreCortoDia = (fecha, hoy) => (diasAntes(fecha, hoy) === 1 ? 'Ayer' : `el ${DIAS[diaSemana(fecha)]} ${partes(fecha)[2]}`);
+
+// Al tocar la pastillita 🎟️: qué son y cuántos quedan.
+function explicarComodines(d) {
+  const { quedan, maximo, proximo } = d.comodines;
+  hoja({
+    titulo: '🎟️ Comodines',
+    contenido: h('div', { class: 'hoja-comodines' },
+      h('p', { class: 'comodines-boletos', 'aria-hidden': 'true' },
+        Array.from({ length: maximo }, (_, i) => h('span', { class: `boleto ${i < quedan ? 'lleno' : ''}` }, '🎟️'))),
+      h('p', { class: 'hoja-texto' },
+        'Si un día se te pasa dibujar, con un comodín puedes dibujarlo después (hasta una semana) y la racha no se rompe.'),
+      h('p', { class: 'hoja-texto' },
+        `${teQuedan(quedan)} de ${maximo}. Cada mes se recarga 1${proximo ? `: el próximo llega el ${fechaCorta(proximo)}` : ''}.`),
+      h('p', { class: 'hoja-texto chiquito' }, `El dibujo de ayer se puede terminar gratis hasta las ${d.horasDeGracia}:00 a. m.`)),
+    acciones: [{ texto: 'Entendido', clase: 'sol' }],
+  });
+}
+
+// La tarjeta de "¿Se te pasó un día?" con los días que se pueden recuperar.
+function tarjetaPerdidos(d) {
+  const perdidos = d.perdidos || [];
+  if (!perdidos.length) return null;
+  const { quedan, proximo } = d.comodines;
+  const gratis = perdidos.some((p) => p.gratis);
+  let texto;
+  if (gratis) texto = `El de ayer todavía lo puedes terminar gratis, hasta las ${d.horasDeGracia}:00 a. m.`;
+  else if (quedan > 0) texto = `Dibújalo con un comodín 🎟️ y la racha sigue. ${teQuedan(quedan)}.`;
+  else texto = `No te quedan comodines 😿${proximo ? ` El próximo llega el ${fechaCorta(proximo)}.` : ''}`;
+  return h('section', { class: 'perdidos', 'aria-label': 'Días que se te pasaron' },
+    h('p', { class: 'perdidos-titulo' }, perdidos.length === 1 ? '¿Se te pasó un día?' : `Se te pasaron ${perdidos.length} días`),
+    h('p', { class: 'perdidos-texto' }, texto),
+    h('div', { class: 'perdidos-dias' }, perdidos.map((p) => {
+      const puede = p.gratis || quedan > 0;
+      const contenido = [h('strong', null, nombreCortoDia(p.fecha, d.fecha).replace(/^el /, '')), h('span', null, p.tema), p.gratis && h('em', null, 'gratis')];
+      return puede
+        ? h('a', { class: 'perdido', href: `#/dibujar/${p.fecha}`, 'aria-label': `Dibujar el del ${fechaLarga(p.fecha)}: ${p.tema}` }, contenido)
+        : h('span', { class: 'perdido bloqueado' }, contenido);
+    })));
 }
 
 // ================================================================== hoy
@@ -357,7 +414,12 @@ async function pantallaHoy(cont, vigente) {
     const notas = datos.notas || {};
     const hijos = [
       h('header', { class: 'cabecera' }, h('p', { class: 'fecha' }, fechaLarga(fecha)), botonPerfil()),
-      racha > 0 && h('p', { class: 'racha' }, icono('corazon', { relleno: true }), `${racha} ${racha === 1 ? 'día' : 'días'} dibujando juntos`),
+      h('div', { class: 'chips-hoy' },
+        racha > 0 && h('p', { class: 'racha' }, icono('corazon', { relleno: true }), `${racha} ${racha === 1 ? 'día' : 'días'} dibujando juntos`),
+        datos.comodines && h('button', {
+          type: 'button', class: 'comodines-chip', onclick: () => explicarComodines(datos),
+          'aria-label': `${comodinesTexto(datos.comodines.quedan)}. Toca para saber qué son.`,
+        }, '🎟️ ', comodinesTexto(datos.comodines.quedan))),
       h('section', { class: `tema ${primeraVez ? 'entra' : ''}`, 'aria-label': 'Tema de hoy' },
         h('p', { class: 'tema-intro' }, 'Hoy toca dibujar'),
         h('h1', { class: 'tema-texto' }, tema)),
@@ -394,7 +456,7 @@ async function pantallaHoy(cont, vigente) {
       }
     }
 
-    hijos.push(avisos.el);
+    hijos.push(tarjetaPerdidos(datos), avisos.el);
 
     if (diasParaReinicio <= 30) {
       hijos.push(h('a', { href: '#/calendario', class: 'aviso-anio' },
@@ -468,6 +530,11 @@ const PALETAS = [
   },
 ];
 const TODOS_LOS_COLORES = new Set(PALETAS.flatMap((p) => p.colores.map(([, hex]) => hex)));
+// Lo que hace el botón de dibujo: [herramienta, nombre, ícono, ayudita]
+const MODOS_DIBUJO = [
+  ['pluma', 'Pincel', 'pluma', 'Trazos a mano'],
+  ['balde', 'Balde', 'balde', 'Rellena una zona'],
+];
 const FORMAS = [['linea', 'Línea'], ['circulo', 'Círculo'], ['cuadrado', 'Cuadrado'], ['triangulo', 'Triángulo'], ['corazon', 'Corazón'], ['estrella', 'Estrella']];
 
 // El grupo de colores, el color y el tamaño del pincel se recuerdan en cada aparato.
@@ -502,15 +569,28 @@ function cargarImagen(url) {
   });
 }
 
-async function pantallaDibujar(cont, vigente) {
+// `fechaRecuperar`: dibujar un día que se te pasó (con un comodín, o gratis si es el de
+// ayer y todavía es de madrugada).
+async function pantallaDibujar(cont, vigente, fechaRecuperar) {
   const datos = await api.hoy();
   if (!vigente()) return undefined;
-  if (datos.yoListo) { navegar('hoy'); return undefined; }
+  let recuperando = null;
+  if (fechaRecuperar) {
+    recuperando = (datos.perdidos || []).find((p) => p.fecha === fechaRecuperar) || null;
+    if (!recuperando || (!recuperando.gratis && datos.comodines.quedan < 1)) {
+      aviso(recuperando ? 'No te quedan comodines para recuperar ese día.' : 'Ese día ya no se puede dibujar.', 3600);
+      navegar('hoy');
+      return undefined;
+    }
+  } else if (datos.yoListo) { navegar('hoy'); return undefined; }
 
-  const { fecha, tema } = datos;
+  const { fecha, tema } = recuperando || datos;
   const claveLocal = claveBorrador(fecha);
-  limpiarBorradoresViejos(fecha);
+  if (!recuperando) limpiarBorradoresViejos(fecha);
   document.body.classList.add('modo-dibujo');
+  if (recuperando) {
+    setTimeout(() => aviso(`🎟️ Estás dibujando el del ${fechaLarga(fecha)}`, 3600), 400);
+  }
 
   // ---- armado de la pantalla
   const caja = h('div', { class: 'lienzo-caja' });
@@ -528,13 +608,34 @@ async function pantallaDibujar(cont, vigente) {
     return b;
   }
 
-  // Selector de formas (aparece sobre el lienzo al elegir "Formas").
-  let selectorForma = null;
-  function cerrarSelector() { selectorForma?.remove(); selectorForma = null; }
+  // Selectores que aparecen sobre el lienzo: el de formas y el de pincel/balde.
+  let selectorAbierto = null; // { el, de: 'formas' | 'dibujo' }
+  function cerrarSelector() { selectorAbierto?.el.remove(); selectorAbierto = null; }
+
+  // Pincel o balde. El último elegido se recuerda mientras dure este dibujo.
+  let modoDibujo = 'pluma';
+  let explicoBalde = false;
+  function abrirSelectorDibujo() {
+    cerrarSelector();
+    const el = h('div', { class: 'selector-formas selector-dibujo', role: 'group', 'aria-label': 'Pincel o balde' },
+      h('div', { class: 'modos-fila' }, MODOS_DIBUJO.map(([id, nombre, ic, ayuda]) => h('button', {
+        type: 'button', class: `modo ${id === lienzo.estado.herramienta ? 'activa' : ''}`, 'aria-pressed': id === lienzo.estado.herramienta,
+        onclick: () => {
+          modoDibujo = id;
+          lienzo.estado.herramienta = id;
+          actualizarHerramientas();
+          cerrarSelector();
+          if (id === 'balde' && !explicoBalde) { explicoBalde = true; aviso('Toca una zona para rellenarla 🪣'); }
+        },
+      }, icono(ic), h('span', { class: 'modo-nombre' }, nombre), h('span', { class: 'modo-ayuda' }, ayuda)))));
+    selectorAbierto = { el, de: 'dibujo' };
+    area.append(el);
+  }
+
   function abrirSelector() {
     cerrarSelector();
     const elegida = lienzo.estado.forma;
-    selectorForma = h('div', { class: 'selector-formas', role: 'group', 'aria-label': 'Formas' },
+    const selectorForma = h('div', { class: 'selector-formas', role: 'group', 'aria-label': 'Formas' },
       h('div', { class: 'formas-fila' }, FORMAS.map(([id, nombre]) => h('button', {
         type: 'button', class: `forma ${id === elegida ? 'activa' : ''}`, 'aria-label': nombre, 'aria-pressed': id === elegida, title: nombre,
         onclick: () => { lienzo.estado.forma = id; actualizarHerramientas(); cerrarSelector(); },
@@ -542,12 +643,26 @@ async function pantallaDibujar(cont, vigente) {
       h('div', { class: 'relleno-fila' },
         h('button', { type: 'button', class: `chip ${!lienzo.estado.relleno ? 'activa' : ''}`, onclick: () => { lienzo.estado.relleno = false; abrirSelector(); } }, 'Contorno'),
         h('button', { type: 'button', class: `chip ${lienzo.estado.relleno ? 'activa' : ''}`, onclick: () => { lienzo.estado.relleno = true; abrirSelector(); } }, 'Relleno')));
+    selectorAbierto = { el: selectorForma, de: 'formas' };
     area.append(selectorForma);
   }
 
+  const dibujando = () => lienzo.estado.herramienta === 'pluma' || lienzo.estado.herramienta === 'balde';
+
   function elegirHerramienta(nombre) {
+    // El botón de dibujo siempre muestra las dos opciones (pincel y balde).
+    if (nombre === 'dibujo') {
+      if (dibujando()) {
+        if (selectorAbierto?.de === 'dibujo') cerrarSelector(); else abrirSelectorDibujo();
+        return;
+      }
+      lienzo.estado.herramienta = modoDibujo;
+      actualizarHerramientas();
+      abrirSelectorDibujo();
+      return;
+    }
     if (nombre === 'formas' && lienzo.estado.herramienta === 'formas') {
-      if (selectorForma) cerrarSelector(); else abrirSelector();
+      if (selectorAbierto?.de === 'formas') cerrarSelector(); else abrirSelector();
       return;
     }
     lienzo.estado.herramienta = nombre;
@@ -558,10 +673,14 @@ async function pantallaDibujar(cont, vigente) {
 
   function actualizarHerramientas() {
     const e = lienzo.estado;
+    const activos = { pluma: dibujando(), formas: e.herramienta === 'formas', borrador: e.herramienta === 'borrador' };
     for (const t of ['pluma', 'formas', 'borrador']) {
-      botones[t].classList.toggle('activa', e.herramienta === t);
-      botones[t].setAttribute('aria-pressed', e.herramienta === t);
+      botones[t].classList.toggle('activa', activos[t]);
+      botones[t].setAttribute('aria-pressed', activos[t]);
     }
+    const [, nombreModo, iconoModo] = MODOS_DIBUJO.find(([id]) => id === modoDibujo);
+    botones.pluma.replaceChildren(icono(iconoModo), h('span', { class: 'herramienta-nombre' }, nombreModo));
+    botones.pluma.setAttribute('aria-label', `${nombreModo} (toca para elegir pincel o balde)`);
     botones.formas.replaceChildren(icono(e.forma), h('span', { class: 'herramienta-nombre' }, 'Formas'));
     for (const el of dock.querySelectorAll('.color')) {
       const activo = el.dataset.color === e.color;
@@ -581,7 +700,7 @@ async function pantallaDibujar(cont, vigente) {
 
   function elegirColor(hex) {
     lienzo.estado.color = hex;
-    if (lienzo.estado.herramienta === 'borrador') lienzo.estado.herramienta = 'pluma';
+    if (lienzo.estado.herramienta === 'borrador') lienzo.estado.herramienta = modoDibujo;
     actualizarHerramientas();
     recordarPincel();
   }
@@ -619,11 +738,17 @@ async function pantallaDibujar(cont, vigente) {
     onchange: () => recordarPincel(),
   });
   const puntoPincel = h('span', { class: 'pincel-punto' });
+  const filaPincel = h('div', { class: 'pincel' },
+    h('span', { class: 'pincel-chico', 'aria-hidden': 'true' }),
+    barraPincel,
+    h('span', { class: 'pincel-muestra', 'aria-hidden': 'true' }, puntoPincel));
 
   // La bolita de la derecha muestra el tamaño real del trazo en la pantalla, en su color.
+  // Con el balde el tamaño no importa: la barra se ve apagadita.
   function actualizarPincel() {
     if (!lienzo) return;
     const e = lienzo.estado;
+    filaPincel.classList.toggle('apagada', e.herramienta === 'balde');
     const borrar = e.herramienta === 'borrador';
     const valor = barraDeGrosor(e.grosor);
     if (Number(barraPincel.value) !== valor) barraPincel.value = String(valor);
@@ -641,7 +766,7 @@ async function pantallaDibujar(cont, vigente) {
 
   const dock = h('div', { class: 'dock' },
     h('div', { class: 'herramientas' },
-      boton('pluma', 'Bolígrafo', 'pluma', () => elegirHerramienta('pluma')),
+      boton('pluma', 'Pincel', 'pluma', () => elegirHerramienta('dibujo')),
       boton('formas', 'Formas', 'corazon', () => elegirHerramienta('formas')),
       boton('borrador', 'Borrador', 'borrador', () => elegirHerramienta('borrador')),
       boton('deshacer', 'Deshacer', 'deshacer', () => lienzo.deshacer(), { clase: 'accion separada' }),
@@ -655,10 +780,7 @@ async function pantallaDibujar(cont, vigente) {
       h('p', { class: 'paleta-nombre', 'aria-live': 'polite' }, nombreGrupo, puntitos),
       h('div', { class: 'paleta-fila' },
         flechaColores(-1, 'Colores anteriores'), coloresEl, flechaColores(1, 'Más colores')),
-      h('div', { class: 'pincel' },
-        h('span', { class: 'pincel-chico', 'aria-hidden': 'true' }),
-        barraPincel,
-        h('span', { class: 'pincel-muestra', 'aria-hidden': 'true' }, puntoPincel))));
+      filaPincel));
 
   const botonTerminar = h('button', { type: 'button', class: 'boton fresa chico', onclick: pedirTerminar }, icono('check'), 'Terminar');
   // La radio vive solo en esta pantalla: al salir (o al terminar) se apaga.
@@ -667,7 +789,10 @@ async function pantallaDibujar(cont, vigente) {
   const pantalla = h('main', { class: 'pantalla dibujar' },
     h('header', { class: 'dibujar-cabecera' },
       h('button', { type: 'button', class: 'volver', 'aria-label': 'Volver a Hoy', onclick: volver }, icono('volver')),
-      h('button', { type: 'button', class: 'tema-chip', onclick: () => aviso(tema, 4000), title: tema }, h('span', { class: 'tema-chip-texto' }, tema)),
+      h('button', {
+        type: 'button', class: `tema-chip ${recuperando ? 'recuperando' : ''}`, title: tema,
+        onclick: () => aviso(recuperando ? `${fechaLarga(fecha)}: ${tema}` : tema, 4000),
+      }, h('span', { class: 'tema-chip-texto' }, recuperando ? `🎟️ ${tema}` : tema)),
       radio.boton,
       botonTerminar),
     area,
@@ -721,23 +846,40 @@ async function pantallaDibujar(cont, vigente) {
   } catch { /* se empieza en blanco */ }
 
   // ---- terminar
+  // ¿Este dibujo gasta un comodín? (el de ayer es gratis solo hasta las `horasDeGracia`)
+  const cuestaComodin = () => Boolean(recuperando) && !(recuperando.gratis && new Date().getHours() < datos.horasDeGracia);
+
   async function pedirTerminar() {
     if (terminando) return;
     if (lienzo.estaVacio()) { aviso('Dibuja algo antes de terminar.'); return; }
-    const si = await confirmar({
-      titulo: '¿Terminar el dibujo de hoy?',
-      texto: `Después ya no se puede cambiar. ${sesion.pareja.nombre} podrá verlo cuando termine el suyo.`,
-      no: 'Seguir dibujando', si: 'Terminar',
-    });
+    const quedan = datos.comodines.quedan;
+    const si = await confirmar(recuperando
+      ? {
+        titulo: `¿Terminar el dibujo del ${fechaLarga(fecha)}?`,
+        texto: cuestaComodin()
+          ? `Se usará 1 comodín 🎟️ (te ${quedan === 1 ? 'queda 1' : `quedan ${quedan}`}; después, ${quedan - 1}). Ya no se podrá cambiar.`
+          : 'Todavía es gratis: no gasta comodín. Ya no se podrá cambiar.',
+        no: 'Seguir dibujando', si: cuestaComodin() ? 'Usar comodín' : 'Terminar',
+      }
+      : {
+        titulo: '¿Terminar el dibujo de hoy?',
+        texto: `Después ya no se puede cambiar. ${sesion.pareja.nombre} podrá verlo cuando termine el suyo.`,
+        no: 'Seguir dibujando', si: 'Terminar',
+      });
     if (!si) return;
+    await guardarDibujo(Boolean(recuperando));
+  }
+
+  async function guardarDibujo(conComodin) {
     terminando = true;
     clearTimeout(temporizador);
     botonTerminar.disabled = true;
     botonTerminar.lastChild.textContent = 'Guardando…';
     try {
-      await api.terminar({ fecha, imagen: lienzo.exportarFinal() });
+      await api.terminar({ fecha, imagen: lienzo.exportarFinal(), ...(conComodin ? { comodin: true } : {}) });
       cerrado = true;
       try { localStorage.removeItem(claveLocal); } catch { /* nada */ }
+      if (recuperando) setTimeout(() => aviso('¡Día recuperado! 🎟️ La racha sigue.', 3600), 300);
       navegar('hoy');
     } catch (e) {
       terminando = false;
@@ -745,6 +887,23 @@ async function pantallaDibujar(cont, vigente) {
       botonTerminar.lastChild.textContent = 'Terminar';
       if (e.estado === 409) { cerrado = true; try { localStorage.removeItem(claveLocal); } catch { /* nada */ } navegar('hoy'); return; }
       if (e.estado === 401) { sesion = null; navegar('entrar'); return; }
+      if (e.estado === 403 && e.datos.error === 'sin_comodines') {
+        aviso('Ya no te quedan comodines 😿 El dibujo queda guardado solo en este aparato.', 4800);
+        return;
+      }
+      // Empezaste ayer, la medianoche te agarró dibujando y ya pasó la hora de gracia:
+      // se puede guardar igual, con un comodín.
+      if (e.estado === 400 && e.datos.error === 'fecha_invalida' && !conComodin) {
+        const usar = await confirmar({
+          titulo: 'Ya pasó la hora para terminar el de ayer',
+          texto: datos.comodines.quedan > 0
+            ? `¿Usar 1 comodín 🎟️ para guardarlo? (te ${datos.comodines.quedan === 1 ? 'queda 1' : `quedan ${datos.comodines.quedan}`})`
+            : 'No te quedan comodines, así que no se puede guardar 😿',
+          no: 'Ahora no', si: datos.comodines.quedan > 0 ? 'Usar comodín' : 'Entendido',
+        });
+        if (usar && datos.comodines.quedan > 0) await guardarDibujo(true);
+        return;
+      }
       aviso(e.estado === 400
         ? 'No se pudo guardar: el dibujo no es válido. Prueba a terminar de nuevo.'
         : 'No se pudo guardar el dibujo. Revisa la conexión e inténtalo otra vez.', 4200);
@@ -827,19 +986,32 @@ async function pantallaCalendario(cont, vigente) {
       nota: d.pareja.nota,
       alCambiar: (nota) => { d.pareja.nota = nota; repegar(suyo, nota); },
     });
+    // ¿Se me pasó este día y todavía lo puedo recuperar?
+    const perdido = !d.yo && (hoyDatos.perdidos || []).find((p) => p.fecha === d.fecha);
+    const puedoRecuperar = perdido && (perdido.gratis || hoyDatos.comodines.quedan > 0);
+    const recuperados = [
+      d.yo?.recuperado && '🎟️ Lo recuperaste con un comodín.',
+      visible && d.pareja.recuperado && `🎟️ ${sesion.pareja.nombre} lo recuperó con un comodín.`,
+    ].filter(Boolean);
     hoja({
       titulo: fechaLarga(d.fecha),
       clase: 'hoja-dia',
       contenido: h('div', null,
         h('p', { class: 'hoja-tema' }, d.tema ? `Ese día tocó dibujar ${d.tema}.` : ''),
         h('div', { class: 'polaroids chicos' }, mio, suyo),
+        recuperados.length > 0 && h('p', { class: 'hoja-recuperado' }, recuperados.join(' ')),
+        perdido && h('p', { class: 'hoja-recuperado' }, puedoRecuperar
+          ? (perdido.gratis ? 'Todavía lo puedes dibujar gratis 🏃' : `Puedes dibujarlo con un comodín 🎟️ (${teQuedan(hoyDatos.comodines.quedan).toLowerCase()}).`)
+          : 'Se te pasó, y no te quedan comodines 😿'),
         burbuja(sesion.pareja, notaMia),
         panel && panel.el,
         (d.yo || visible) && botonPostal(() => ({
           fecha: d.fecha, tema: d.tema, miV: d.yo?.v, parejaV: visible ? d.pareja.v : null,
           notaMia, notaSuya: visible ? d.pareja.nota : null, fuente: fuenteLocal,
         }))),
-      acciones: [{ texto: 'Cerrar', clase: 'sol' }],
+      acciones: puedoRecuperar
+        ? [{ texto: 'Cerrar', clase: 'blanco' }, { texto: '🎟️ Dibujarlo', clase: 'fresa', onClick: () => navegar(`dibujar/${d.fecha}`) }]
+        : [{ texto: 'Cerrar', clase: 'sol' }],
     });
   }
 
@@ -945,7 +1117,7 @@ let hayVersionNueva = false;
 let ultimaRevision = 0;
 
 function recargarSiToca() {
-  if (!hayVersionNueva || location.hash === '#/dibujar') return false;
+  if (!hayVersionNueva || location.hash.startsWith('#/dibujar')) return false;
   try { sessionStorage.setItem(AVISO_ACTUALIZADA, '1'); } catch { /* sin almacenamiento */ }
   location.reload();
   return true;
@@ -982,7 +1154,8 @@ async function ir() {
 
   raiz.replaceChildren();
   document.body.classList.remove('modo-dibujo');
-  const ruta = location.hash.replace(/^#\//, '') || 'hoy';
+  // #/dibujar/2026-10-19 = recuperar ese día con un comodín
+  const [ruta, parametro] = (location.hash.replace(/^#\//, '') || 'hoy').split('/');
 
   try {
     if (!sesion) {
@@ -1001,7 +1174,7 @@ async function ir() {
     const pantallas = { hoy: pantallaHoy, dibujar: pantallaDibujar, calendario: pantallaCalendario };
     const construir = pantallas[ruta];
     if (!construir) { location.replace('#/hoy'); return; }
-    const limpieza = await construir(raiz, vigente);
+    const limpieza = await construir(raiz, vigente, parametro);
     if (!vigente()) { if (limpieza) limpieza(); return; }
     soltar = limpieza || null;
   } catch (e) {

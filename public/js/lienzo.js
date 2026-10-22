@@ -7,6 +7,8 @@
 // El lienzo tiene un tamaño interno fijo (3:4) para que los dibujos de las dos
 // personas sean comparables sin importar si dibujan en teléfono o iPad.
 
+import { rellenar, hexARgb } from './balde.js';
+
 export const ANCHO = 1200;
 export const ALTO = 1600;
 const FINAL = { ancho: 720, alto: 960 };       // lo que se envía; el servidor lo comprime a pocos KB
@@ -129,9 +131,19 @@ function pintarForma(c, op) {
   c.stroke();
 }
 
+// El balde lee los píxeles de cómo va el dibujo y rellena desde el punto tocado.
+// Devuelve false si no cambió nada (la zona ya era de ese color).
+function pintarBalde(c, op) {
+  const imagen = c.getImageData(0, 0, ANCHO, ALTO);
+  const cambio = rellenar(imagen, op.x, op.y, hexARgb(op.color));
+  if (cambio) c.putImageData(imagen, 0, 0, cambio.x, cambio.y, cambio.w, cambio.h);
+  return Boolean(cambio);
+}
+
 function pintarOp(c, op) {
   if (op.t === 'trazo') pintarTrazo(c, op);
   else if (op.t === 'forma') pintarForma(c, op);
+  else if (op.t === 'balde') pintarBalde(c, op);
   else if (op.t === 'limpiar') { c.fillStyle = PAPEL; c.fillRect(0, 0, ANCHO, ALTO); }
 }
 
@@ -203,6 +215,18 @@ export function crearLienzo(caja, { alCambiar } = {}) {
     avisar();
   }
 
+  // Un circulito del color que se expande donde cayó el balde.
+  function onda(x, y, color) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const el = document.createElement('span');
+    el.className = 'balde-onda';
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    el.style.setProperty('--color', color);
+    caja.append(el);
+    setTimeout(() => el.remove(), 600);
+  }
+
   // ---- punteros
   function puntoDe(e) {
     const w = e.pointerType === 'pen' ? Math.round((0.35 + 1.1 * (e.pressure || 0.5)) * 100) / 100 : 1;
@@ -226,7 +250,15 @@ export function crearLienzo(caja, { alCambiar } = {}) {
     rect = vista.getBoundingClientRect();
     const p = puntoDe(e);
 
-    if (estado.herramienta === 'formas') {
+    if (estado.herramienta === 'balde') {
+      // Un toque y listo: no hay trazo que seguir.
+      const op = { t: 'balde', x: Math.round(p[0]), y: Math.round(p[1]), color: estado.color };
+      if (pintarBalde(ctx, op)) {
+        confirmarOp(op);
+        onda(e.clientX - rect.left, e.clientY - rect.top, op.color);
+      }
+      try { vista.releasePointerCapture(e.pointerId); } catch { /* nada */ }
+    } else if (estado.herramienta === 'formas') {
       activo = { id: e.pointerId, tipo: 'forma', a: p, b: p };
     } else {
       const borrar = estado.herramienta === 'borrador';
@@ -329,7 +361,7 @@ export function crearLienzo(caja, { alCambiar } = {}) {
     let hayTinta = Boolean(imagenBase);
     for (const op of ops) {
       if (op.t === 'limpiar') hayTinta = false;
-      else if (op.t === 'forma' || (op.t === 'trazo' && !op.borrar)) hayTinta = true;
+      else if (op.t === 'forma' || op.t === 'balde' || (op.t === 'trazo' && !op.borrar)) hayTinta = true;
     }
     return !hayTinta;
   }

@@ -27,6 +27,7 @@ const TRAZOS = {
   enviar: '<path d="M5.5 15.5L26.5 6l-6.5 20.5-4.6-8.3z"/><path d="M15.4 18.2L26.5 6"/>',
   compartir: '<path d="M16 19V5.5M10.5 11L16 5.5l5.5 5.5"/><path d="M9.5 14.5H8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1.5"/>',
   postal: '<rect x="4.5" y="7.5" width="23" height="17" rx="3"/><path d="M17.5 12h6M17.5 16h6M17.5 20h4"/><rect x="8" y="11" width="6" height="7" rx="1"/>',
+  balde: '<path d="M5.2 14.2L14 5.4l10.4 10.4-8.8 8.8a2.4 2.4 0 0 1-3.4 0l-7-7a2.4 2.4 0 0 1 0-3.4z"/><path d="M5.4 16.4h18.4"/><path d="M14 5.4L10.6 2"/><path d="M27 19.5c1.7 2.6 2.6 4.1 2.6 5.2a2.6 2.6 0 0 1-5.2 0c0-1.1.9-2.6 2.6-5.2z" fill="currentColor"/>',
   musica: '<path d="M12 23.5V8.5l13-3v15"/><circle cx="8.5" cy="23.5" r="3.5"/><circle cx="21.5" cy="20.5" r="3.5"/>',
   play: '<path d="M10.5 6.5v19l15-9.5z" fill="currentColor"/>',
   pausa: '<rect x="8.5" y="7" width="5" height="18" rx="1.5" fill="currentColor"/><rect x="18.5" y="7" width="5" height="18" rx="1.5" fill="currentColor"/>',

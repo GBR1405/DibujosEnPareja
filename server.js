@@ -10,6 +10,7 @@ const { temaDelDia } = require('./lib/tema-del-dia');
 const { crearAvisos } = require('./lib/avisos');
 const { REACCIONES, reaccionPorId, LARGO_COMENTARIO } = require('./lib/reacciones');
 const { crearRadio } = require('./lib/radio');
+const { saldo, siguienteMes } = require('./lib/comodines');
 const F = require('./lib/fecha');
 
 // ---------------------------------------------------------------- arranque
@@ -229,10 +230,44 @@ app.use('/api', async (req, res, next) => {
   next();
 });
 
-// Se puede terminar el dibujo de hoy o, si la medianoche te agarró dibujando, el de ayer
-// (siempre que sea del mismo año).
-const fechaPermitida = (fecha, h) => F.esFecha(fecha)
-  && (fecha === h || (fecha === F.sumarDias(h, -1) && F.anioDe(fecha) === F.anioDe(h)));
+// ---------------------------------------------------------------- qué días se pueden dibujar
+// - Hoy, siempre.
+// - Ayer, gratis hasta las `horasDeGracia` de hoy (por si la medianoche te agarró dibujando).
+// - Un día de los últimos `comodines.diasAtras` que se te pasó: con un comodín.
+// Siempre del mismo año (el 1 de enero se empieza en blanco).
+const enGracia = () => F.horaEn(config.zonaHoraria) < config.horasDeGracia;
+
+// Los comodines de `quien`: cuántos le quedan, cuándo llega el próximo, y qué días puede
+// recuperar (los de la ventana que no dibujó, desde el primer dibujo de la pareja).
+async function infoComodines(quien, hoy) {
+  const { maximo, porMes, diasAtras } = config.comodines;
+  const { dibujados, primera, usos } = await base.estadoComodines(quien, F.sumarDias(hoy, -diasAtras), hoy);
+  const mes = hoy.slice(0, 7);
+  const quedan = saldo(usos, mes, { maximo, porMes });
+  const hechos = new Set(dibujados);
+  const ventana = [];
+  for (let d = 1; d <= diasAtras; d += 1) {
+    const fecha = F.sumarDias(hoy, -d);
+    if (F.anioDe(fecha) !== F.anioDe(hoy) || !primera || fecha < primera) break;
+    ventana.push(fecha);
+  }
+  const ayer = F.sumarDias(hoy, -1);
+  return {
+    quedan,
+    maximo,
+    proximo: quedan < maximo ? `${siguienteMes(mes)}-01` : null,
+    ventana,
+    perdidos: ventana.filter((f) => !hechos.has(f)).map((fecha) => ({ fecha, tema: temaDelDia(fecha), gratis: fecha === ayer && enGracia() })),
+  };
+}
+
+function avisarRecuperado(yo, fecha) {
+  const nombre = porId.get(yo).nombre;
+  return avisos.avisar([{
+    quien: parejaDe(yo),
+    mensaje: { titulo: `${nombre} recuperó su dibujo del ${F.fechaCorta(fecha)} 🎟️`, texto: 'Usó un comodín para no perder la racha.', tag: 'pareja', ttl: 12 * HORAS },
+  }]);
+}
 
 // La versión de lo que se ve en el teléfono: una huella de los archivos de public/
 // (cambia con cada cambio publicado). La app la compara al volver a abrirse y, si hay
@@ -322,7 +357,10 @@ function calcularRacha(fechas, fecha) {
 app.get('/api/hoy', async (req, res) => {
   const fecha = req.hoy;
   const otra = parejaDe(req.yo);
-  const { deHoy, fechasCompletas, reacciones } = await base.resumenDeHoy(fecha);
+  const [{ deHoy, fechasCompletas, reacciones }, comodines] = await Promise.all([
+    base.resumenDeHoy(fecha),
+    infoComodines(req.yo, fecha),
+  ]);
   const mio = deHoy.find((f) => f.quien === req.yo);
   const suyo = deHoy.find((f) => f.quien === otra);
   const notaDe = (quien) => verNota(reacciones.find((r) => r.quien === quien));
@@ -338,14 +376,26 @@ app.get('/api/hoy', async (req, res) => {
     // La reacción que mi pareja le dejó a mi dibujo, y la que yo le dejé al suyo.
     notas: { mio: mio ? notaDe(req.yo) : null, suyo: mio && suyo ? notaDe(otra) : null },
     racha: calcularRacha(fechasCompletas, fecha),
+    // Mis comodines y los días que se me pasaron y todavía puedo recuperar.
+    comodines: { quedan: comodines.quedan, maximo: comodines.maximo, proximo: comodines.proximo },
+    perdidos: comodines.perdidos,
+    horasDeGracia: config.horasDeGracia,
     anio: F.anioDe(fecha),
     diasParaReinicio: F.diasHastaFinDeAnio(fecha),
   });
 });
 
 app.post('/api/terminar', async (req, res) => {
-  const { fecha, imagen } = req.body || {};
-  if (!fechaPermitida(fecha, req.hoy)) return res.status(400).json({ error: 'fecha_invalida' });
+  const { fecha, imagen, comodin } = req.body || {};
+  if (!F.esFecha(fecha) || fecha > req.hoy || F.anioDe(fecha) !== F.anioDe(req.hoy)) return res.status(400).json({ error: 'fecha_invalida' });
+  // Un día anterior (fuera de la gracia de ayer) solo con comodín, pedido a propósito.
+  let comodines = null;
+  if (fecha !== req.hoy && !(fecha === F.sumarDias(req.hoy, -1) && enGracia())) {
+    if (comodin !== true) return res.status(400).json({ error: 'fecha_invalida' });
+    comodines = await infoComodines(req.yo, req.hoy);
+    if (!comodines.ventana.includes(fecha)) return res.status(400).json({ error: 'fecha_invalida' });
+    if (comodines.quedan < 1) return res.status(403).json({ error: 'sin_comodines', proximo: comodines.proximo });
+  }
 
   const m = /^data:image\/(?:png|webp|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/.exec(typeof imagen === 'string' && imagen.length < 2_800_000 ? imagen : '');
   if (!m) return res.status(400).json({ error: 'imagen_invalida' });
@@ -353,12 +403,16 @@ app.post('/api/terminar', async (req, res) => {
   const listo = await comprimir(Buffer.from(m[1], 'base64'), config.imagen);
   if (!listo) return res.status(400).json({ error: 'imagen_invalida' });
 
-  const guardado = await base.guardar({ fecha, quien: req.yo, imagen: listo.imagen, mini: listo.mini });
+  const dibujo = { fecha, quien: req.yo, imagen: listo.imagen, mini: listo.mini };
+  const guardado = comodines
+    ? await base.guardarConComodin({ ...dibujo, mes: req.hoy.slice(0, 7) })
+    : await base.guardar(dibujo);
   if (!guardado) return res.status(409).json({ error: 'ya_terminado' });
-  // Solo el dibujo de hoy avisa (terminar el de ayer a medianoche no). Tarda como mucho
-  // ~3 s y nunca falla: si el aviso no sale, el dibujo igual quedó guardado.
+  // El dibujo de hoy avisa a la pareja, y también recuperar un día con comodín (terminar
+  // el de ayer a medianoche no). Tarda como mucho ~3 s y nunca falla.
   if (fecha === req.hoy) await avisarALaPareja(req.yo, fecha);
-  return res.json({ ok: true, bytes: listo.imagen.length });
+  else if (comodines) await avisarRecuperado(req.yo, fecha);
+  return res.json({ ok: true, bytes: listo.imagen.length, ...(comodines ? { comodines: comodines.quedan - 1 } : {}) });
 });
 
 // ---- reacciones
@@ -462,9 +516,9 @@ app.get('/api/mes/:mes', async (req, res) => {
       fecha,
       futuro,
       tema: futuro ? null : temaDelDia(fecha),
-      yo: mio ? { v: mio.creado, mini: url(mio.mini), nota: notas.get(`${fecha}/${req.yo}`) || null } : null,
+      yo: mio ? { v: mio.creado, mini: url(mio.mini), nota: notas.get(`${fecha}/${req.yo}`) || null, recuperado: mio.recuperado } : null,
       pareja: suyo ? {
-        v: suyo.creado, visible, mini: visible ? url(suyo.mini) : null, nota: (visible && notas.get(`${fecha}/${otra}`)) || null,
+        v: suyo.creado, visible, mini: visible ? url(suyo.mini) : null, nota: (visible && notas.get(`${fecha}/${otra}`)) || null, recuperado: suyo.recuperado,
       } : null,
     });
   }
