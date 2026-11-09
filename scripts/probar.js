@@ -669,6 +669,21 @@ function servidorAparte(env) {
     assert.equal((await pedir('POST', '/api/casa/cuarto', { cookie: B.cookie, cuerpo: { tipo: 'pintura_crema' } })).estado, 200);
     assert.equal((await pedir('POST', '/api/casa/cuarto', { cookie: B.cookie, cuerpo: { tipo: 'piso_lila' } })).estado, 402); paso('la pintura y el piso se compran una vez y se cambian cuando quieran');
     assert.ok(casa.movimientos.some((m) => m.motivo === 'compra:cama' && m.cantidad === -140)); paso('la alcancía guarda en qué se gastó');
+    // El segundo piso
+    await base.sumarMonedas([{ clave: 'prueba:piso', quien: null, cantidad: 400, motivo: 'prueba' }]);
+    const puf = await comprar(A.cookie, 'puf');
+    assert.equal((await poner({ id: puf.datos.id, x: 0, z: 4, rot: 0 })).estado, 200);
+    assert.equal((await poner({ id: puf.datos.id, x: 3, z: 3, rot: 0, piso: 1 })).estado, 400); paso('sin segundo piso no se puede poner nada arriba');
+    const piso2 = await comprar(B.cookie, 'segundo_piso');
+    assert.deepEqual([piso2.estado, piso2.datos.guardados], [200, [puf.datos.id]]); paso('al comprar el segundo piso, lo que estaba donde va la escalera se guarda');
+    assert.equal((await comprar(A.cookie, 'segundo_piso')).estado, 409);
+    assert.equal((await poner({ id: puf.datos.id, x: 0, z: 4, rot: 0 })).estado, 409);
+    assert.equal((await poner({ id: puf.datos.id, x: 0, z: 5, rot: 0, piso: 1 })).estado, 409); paso('la escalera (abajo) y su hueco (arriba) no se pueden tapar');
+    assert.equal((await poner({ id: puf.datos.id, x: 3, z: 3, rot: 0, piso: 1 })).estado, 200);
+    assert.equal((await poner({ id: cama.datos.id, x: 3, z: 3, rot: 0, piso: 0 })).estado, 200);
+    assert.equal((await poner({ id: puf.datos.id, x: 3, z: 3, rot: 0, piso: 2 })).estado, 400);
+    casa = (await pedir('GET', '/api/casa', { cookie: B.cookie })).datos;
+    assert.deepEqual([casa.pisos, casa.muebles.find((m) => m.id === puf.datos.id).piso, casa.tiene.includes('segundo_piso')], [2, 1, true]); paso('arriba y abajo cada piso tiene sus muebles (sin encimarse entre pisos)');
 
     console.log('Personajes');
     const personaje = async (w, h, formato = 'png') => `data:image/${formato};base64,${(await sharp({ create: { width: w, height: h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })

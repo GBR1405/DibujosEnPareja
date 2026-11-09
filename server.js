@@ -810,6 +810,8 @@ app.get('/api/reto/imagen/:semana/:clave', async (req, res) => {
 
 // ---------------------------------------------------------------- la casa
 const tieneEl = (muebles, id) => CASA.muebleDe(id)?.precio === 0 || muebles.some((m) => m.tipo === id);
+// Cuántos pisos tiene la casa: 2 si compraron el segundo piso.
+const pisosDe = (muebles) => (muebles.some((m) => m.tipo === 'segundo_piso') ? 2 : 1);
 
 app.get('/api/casa', async (req, res) => {
   await base.sincronizarMonedas({ dibujo: G.dibujo, pareja: G.pareja });
@@ -824,9 +826,11 @@ app.get('/api/casa', async (req, res) => {
     catalogo: CASA.CATALOGO,
     lado: CASA.LADO,
     ganancias: G,
-    muebles: muebles.filter((m) => !['pintura', 'piso'].includes(CASA.muebleDe(m.tipo)?.cat)),
-    tiene: CASA.CATALOGO.filter((m) => ['pintura', 'piso'].includes(m.cat) && tieneEl(muebles, m.id)).map((m) => m.id),
+    muebles: muebles.filter((m) => !CASA.esDelCuarto(CASA.muebleDe(m.tipo))),
+    tiene: CASA.CATALOGO.filter((m) => CASA.esDelCuarto(m) && tieneEl(muebles, m.id)).map((m) => m.id),
     ajustes: { pintura: ajustes.pintura || CASA.POR_DEFECTO.pintura, piso: ajustes.piso || CASA.POR_DEFECTO.piso },
+    pisos: pisosDe(muebles),
+    escalera: CASA.ESCALERA,
     avatares: Object.fromEntries(IDS.map((q) => [q, avatares[q] || null])),
     // Cómo anda cada quien hoy (los personajes lo muestran).
     animo: Object.fromEntries(IDS.map((q) => [q, {
@@ -839,25 +843,32 @@ app.get('/api/casa', async (req, res) => {
 app.post('/api/casa/comprar', async (req, res) => {
   const m = CASA.muebleDe(req.body?.tipo);
   if (!m) return res.status(400).json({ error: 'mueble_invalido' });
-  const deCuarto = m.cat === 'pintura' || m.cat === 'piso';
-  if (deCuarto && tieneEl(await base.muebles(), m.id)) return res.status(409).json({ error: 'ya_lo_tienen' });
+  const deCuarto = CASA.esDelCuarto(m);
+  const antes = await base.muebles();
+  if (deCuarto && tieneEl(antes, m.id)) return res.status(409).json({ error: 'ya_lo_tienen' });
   const id = await base.comprar({ tipo: m.id, precio: m.precio, quien: req.yo });
   if (id == null) return res.status(402).json({ error: 'sin_monedas', monedas: await base.saldo() });
-  if (deCuarto) await base.guardarAjuste(m.cat, m.id); // la pintura o el piso se estrenan de una
-  return res.json({ ok: true, id, monedas: await base.saldo() });
+  if (m.cat === 'pintura' || m.cat === 'piso') await base.guardarAjuste(m.cat, m.id); // la pintura o el piso se estrenan de una
+  // El segundo piso trae su escalera: lo que estaba donde va la escalera se guarda.
+  const guardados = m.id === 'segundo_piso' ? CASA.tapanLaEscalera(antes).map((x) => x.id) : [];
+  for (const g of guardados) await base.moverMueble({ id: g, x: null, z: null, rot: 0, pared: null, piso: 0 });
+  if (guardados.length) {
+    await avisarA(parejaDe(req.yo), `${NOMBRES[req.yo]} compró el segundo piso 🏠`, 'Algunos muebles se guardaron para hacerle lugar a la escalera.', { tag: 'casa' });
+  }
+  return res.json({ ok: true, id, monedas: await base.saldo(), guardados });
 });
 
-// Poner (o mover) un mueble: { id, x, z, rot } en el piso, o { id, x, pared } en la pared.
+// Poner (o mover) un mueble: { id, x, z, rot, piso } en el piso, o { id, x, pared, piso } en la pared.
 app.post('/api/casa/poner', async (req, res) => {
-  const { id, x, z, rot, pared } = req.body || {};
+  const { id, x, z, rot, pared, piso } = req.body || {};
   const muebles = await base.muebles();
   const mueble = muebles.find((m) => m.id === id);
   if (!mueble) return res.status(404).json({ error: 'no_existe' });
   const tipo = CASA.muebleDe(mueble.tipo);
   const nuevo = tipo && tipo.cat === 'pared'
-    ? { id, tipo: mueble.tipo, x, z: 0, rot: 0, pared }
-    : { id, tipo: mueble.tipo, x, z, rot: rot || 0, pared: null };
-  const error = CASA.revisarLugar(nuevo, muebles);
+    ? { id, tipo: mueble.tipo, x, z: 0, rot: 0, pared, piso: piso || 0 }
+    : { id, tipo: mueble.tipo, x, z, rot: rot || 0, pared: null, piso: piso || 0 };
+  const error = CASA.revisarLugar(nuevo, muebles, { pisos: pisosDe(muebles) });
   if (error) return res.status(error === 'lugar_ocupado' ? 409 : 400).json({ error });
   await base.moverMueble(nuevo);
   return res.json({ ok: true });
@@ -873,7 +884,7 @@ app.post('/api/casa/guardar', async (req, res) => {
 app.post('/api/casa/vender', async (req, res) => {
   const mueble = await base.mueble(req.body?.id);
   const tipo = mueble && CASA.muebleDe(mueble.tipo);
-  if (!mueble || !tipo || tipo.cat === 'pintura' || tipo.cat === 'piso') return res.status(404).json({ error: 'no_existe' });
+  if (!mueble || !tipo || CASA.esDelCuarto(tipo)) return res.status(404).json({ error: 'no_existe' });
   await base.vender({ id: mueble.id, reembolso: Math.floor(tipo.precio / 2), quien: req.yo });
   return res.json({ ok: true, monedas: await base.saldo() });
 });

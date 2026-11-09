@@ -1,0 +1,24 @@
+- generic [ref=f2e2]:
+  - main [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - heading "Nuestra casa" [level=1] [ref=f2e5]
+      - button "🪙 1110" [ref=f2e6] [cursor=pointer]
+    - generic "La casa. Toca el piso para que tu personaje camine hasta allá." [ref=f2e7]:
+      - group "Qué piso ver" [ref=f2e8]:
+        - button "2º piso" [ref=f2e9] [cursor=pointer]
+        - button "1er piso" [ref=f2e10] [cursor=pointer]
+      - generic [ref=f2e11] [cursor=pointer]
+    - paragraph [ref=f2e12]: Toca el piso y tu personaje camina hasta allá. Toca un mueble para que lo use, o a tu pareja para darle un abrazo 💛
+    - generic [ref=f2e13]:
+      - button "Decorar" [ref=f2e14] [cursor=pointer]
+      - button "Mi personaje" [ref=f2e18] [cursor=pointer]
+    - paragraph [ref=f2e24]: Estoy afinando algunas cosas :p
+  - navigation "Secciones" [ref=f2e25]:
+    - link "Hoy" [ref=f2e26] [cursor=pointer]:
+      - /url: "#/hoy"
+    - link "Calendario" [ref=f2e32] [cursor=pointer]:
+      - /url: "#/calendario"
+    - link "Casa" [ref=f2e38] [cursor=pointer]:
+      - /url: "#/casa"
+    - link "Nosotros" [ref=f2e45] [cursor=pointer]:
+      - /url: "#/nosotros"

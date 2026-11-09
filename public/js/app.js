@@ -225,7 +225,8 @@ function queDiceGarabatito(d, reto) {
   const pos = d.posponer || {};
   if ((pos.pendientes || []).length) return { texto: '¡Hoy te tocan dos! El que pospusiste y el de hoy ✏️✏️ Que no se pierda la racha.', animo: 'normal' };
   if (!d.yoListo && pos.mio) return { texto: `Descansa, ${sesion.yo.nombre} 💛 Mañana dibujamos el doble.`, animo: 'dormido' };
-  if (pos.suyo && !d.parejaListo) return { texto: `${p} no puede dibujar hoy… ¿le mandas ánimos? 💛`, animo: 'normal' };
+  if (pos.suyo && !d.parejaListo && !d.yoListo) return { texto: `${p} pospuso el de hoy, pero tú sí puedes dibujar ✏️ ¿Y si le mandas ánimos? 💛`, animo: 'normal' };
+  if (pos.suyo && !d.parejaListo) return { texto: `${p} no pudo dibujar hoy… ¿le mandas ánimos? 💛`, animo: 'normal' };
   if (!d.yoListo) {
     if (d.parejaListo) return { texto: `¡${p} ya dibujó! Te está esperando 👀`, animo: 'feliz' };
     if (d.temaElegidoPor && d.temaElegidoPor !== sesion.yo.id) return { texto: `¡El tema de hoy lo eligió ${p}! 🎲`, animo: 'feliz' };
@@ -418,7 +419,12 @@ async function pantallaHoy(cont, vigente) {
       }
     }
 
-    if (pos.suyo) hijos.push(tarjetaPospuesto({ cuenta: sesion.pareja, p: pos.suyo, mia: false, alAnimar: mandarAnimos }));
+    if (pos.suyo) {
+      hijos.push(tarjetaPospuesto({
+        cuenta: sesion.pareja, p: pos.suyo, mia: false, alAnimar: mandarAnimos,
+        extra: !yoListo && h('p', { class: 'pospuesto-nota' }, `Tú sí puedes dibujar el de hoy ✏️ ${sesion.pareja.nombre} lo verá cuando haga el suyo.`),
+      }));
+    }
     if ((pos.suyosPendientes || []).length) {
       hijos.push(h('p', { class: 'nota-suave' }, `⏰ Hoy ${sesion.pareja.nombre} tiene que hacer también el que pospuso ayer.`));
     }

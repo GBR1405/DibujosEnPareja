@@ -205,17 +205,25 @@ function patas(grupo, w, d, alto, color, grueso = 0.06) {
 }
 
 const CONSTRUCTORES = {
+  // La cama: el colchón, dos almohadas y una cobija que se levanta cuando alguien se
+  // acuesta (así queda tapadito, con la cabeza en la almohada). La cabecera va atrás (-z).
   cama() {
     const g = new THREE.Group();
     g.add(P(G.caja(1.9, 0.32, 2.85, 0.06), C.madera, { y: 0.26 }));
     patas(g, 1.85, 2.8, 0.12, C.maderaOscura, 0.07);
     g.add(P(G.caja(1.78, 0.26, 2.6, 0.1), C.blanco, { y: 0.54, z: 0.05 }));
-    g.add(P(G.caja(1.84, 0.14, 1.75, 0.06), C.rosa, { y: 0.66, z: 0.45 }));
-    g.add(P(G.caja(1.86, 0.06, 0.3, 0.03), C.fresa, { y: 0.74, z: -0.32 }));
-    for (const x of [-0.45, 0.45]) g.add(P(G.caja(0.72, 0.18, 0.42, 0.08), C.crema, { x, y: 0.74, z: -1.0 }));
+    for (const x of [-0.45, 0.45]) g.add(P(G.caja(0.74, 0.16, 0.44, 0.08), C.crema, { x, y: 0.75, z: -1.0 }));
     g.add(P(G.caja(1.98, 1.15, 0.16, 0.06), C.madera, { y: 0.7, z: -1.38 }));
     g.add(P(G.esf(0.16, 1, 0.9, 0.35), C.fresa, { y: 1.0, z: -1.29 }));
-    return { grupo: g, asientos: [[-0.42, 0.78, -0.25], [0.42, 0.78, -0.25]], cama: true };
+    // La cobija (con su doblez) en un grupo que sube y baja.
+    const cobija = new THREE.Group();
+    cobija.position.set(0, 0.66, 0.42);
+    cobija.add(P(G.caja(1.88, 0.14, 1.82, 0.07), C.rosa));
+    cobija.add(P(G.caja(1.9, 0.07, 0.3, 0.035), C.fresa, { y: 0.07, z: -0.78 }));
+    for (const x of [-0.5, 0, 0.5]) cobija.add(P(G.esf(0.05, 1, 0.4, 1), C.blanco, { x, y: 0.075, z: 0.2, sinContorno: true, sombra: false }));
+    g.add(cobija);
+    // Dónde quedan los pies al acostarse (cada lado de la cama); la cabeza va hacia -z.
+    return { grupo: g, camas: [[-0.44, 0.71, 0.66], [0.44, 0.71, 0.66]], cobija, cobijaAltura: { vacia: 0.66, ocupada: 0.86 } };
   },
   sofa() {
     const g = new THREE.Group();
@@ -627,6 +635,11 @@ export function animarMueble(m, t) {
   if (m.disco && m.sonando) m.disco.rotation.y = t * 3;
   if (m.focos) m.focos.forEach((f, i) => { f.material.opacity = 0.65 + Math.sin(t * 2.4 + i) * 0.35; f.material.transparent = true; });
   if (m.luz) m.luz.intensity = 1.5 + Math.sin(t * 1.3) * 0.08;
+  if (m.cobija) {
+    // Sube suavecito si hay alguien acostado (y "respira" un poquito).
+    const meta = (m.durmiendo || 0) > 0 ? m.cobijaAltura.ocupada + Math.sin(t * 1.4) * 0.012 : m.cobijaAltura.vacia;
+    m.cobija.position.y += (meta - m.cobija.position.y) * 0.08;
+  }
   if (m.orejas) {
     // El perrito nube: las orejas se mecen; si está volando, aletea, sube y da una vuelta.
     const k = m.volarDesde != null ? (t - m.volarDesde) / 3.2 : 1;
@@ -693,34 +706,114 @@ function texturaPared(color, id) {
   });
 }
 
-// El cuarto: piso de `lado` x `lado`, dos paredes atrás (izquierda: x = 0; derecha: z = 0).
-export function construirCuarto(lado, { pintura, piso }) {
-  const g = new THREE.Group();
-  const alto = 4.2;
-  const tPiso = texturaPiso(piso.id, piso.color);
-  tPiso.wrapS = THREE.RepeatWrapping;
-  tPiso.wrapT = THREE.RepeatWrapping;
-  tPiso.repeat.set(lado / 4, lado / 4);
-  const suelo = pieza(G.cubo(lado, 0.3, lado), new THREE.MeshToonMaterial({ map: tPiso, gradientMap: gradiente() }), { x: lado / 2, y: -0.15, z: lado / 2, sombra: false });
-  suelo.receiveShadow = true;
-  suelo.userData.esPiso = true;
-  g.add(suelo);
-  g.add(pieza(G.caja(lado + 0.5, 0.25, lado + 0.5, 0.08), C.maderaOscura, { x: lado / 2 - 0.1, y: -0.42, z: lado / 2 - 0.1, sombra: false }));
+export const ALTO_PISO = 4.2; // de piso a piso
+const ALTO_PARED = 4.2;
 
+function sueloDe(w, d, piso, { x, y, z }) {
+  const t = texturaPiso(piso.id, piso.color);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(w / 4, d / 4);
+  const s = pieza(G.cubo(w, 0.3, d), new THREE.MeshToonMaterial({ map: t, gradientMap: gradiente() }), { x, y, z, sombra: false });
+  s.receiveShadow = true;
+  s.userData.esPiso = true;
+  return s;
+}
+
+// Las dos paredes de atrás de un piso (izquierda: x = 0; derecha: z = 0), con su zócalo
+// y su moldura. `base`: la altura del piso.
+function paredes(lado, matPared, base, nivel) {
+  const g = new THREE.Group();
+  const izq = pieza(G.cubo(0.3, ALTO_PARED, lado + 0.3), matPared, { x: -0.15, y: base + ALTO_PARED / 2 - 0.3, z: lado / 2 - 0.15 });
+  izq.userData.pared = 'izq';
+  izq.userData.nivel = nivel;
+  const der = pieza(G.cubo(lado, ALTO_PARED, 0.3), matPared, { x: lado / 2, y: base + ALTO_PARED / 2 - 0.3, z: -0.15 });
+  der.userData.pared = 'der';
+  der.userData.nivel = nivel;
+  g.add(izq, der);
+  g.add(pieza(G.cubo(0.06, 0.18, lado), C.blanco, { x: 0.03, y: base + 0.09, z: lado / 2, sombra: false }));
+  g.add(pieza(G.cubo(lado, 0.18, 0.06), C.blanco, { x: lado / 2, y: base + 0.09, z: 0.03, sombra: false }));
+  g.add(pieza(G.cubo(0.34, 0.12, lado + 0.34), C.blanco, { x: -0.15, y: base + ALTO_PARED - 0.3, z: lado / 2 - 0.17, sombra: false }));
+  g.add(pieza(G.cubo(lado + 0.04, 0.12, 0.34), C.blanco, { x: lado / 2, y: base + ALTO_PARED - 0.3, z: -0.15, sombra: false }));
+  return { grupo: g, paredes: [izq, der] };
+}
+
+// La escalera: 8 escalones de madera pegados a la pared izquierda, que suben de z = 7
+// (abajo) a z = 3 (arriba, a la altura del segundo piso).
+function escalera({ x, desde, hasta }) {
+  const g = new THREE.Group();
+  const largo = hasta - desde + 1;
+  const n = largo * 2;
+  const fondo = largo / n;
+  for (let i = 0; i < n; i += 1) {
+    const alto = ((i + 1) * ALTO_PISO) / n;
+    const z1 = hasta + 1 - i * fondo;
+    g.add(pieza(G.cubo(0.9, alto, fondo), i % 2 ? C.madera : C.maderaClara, { x: x + 0.5, y: alto / 2, z: z1 - fondo / 2 }));
+    g.add(pieza(G.cubo(0.94, 0.05, fondo + 0.02), C.blanco, { x: x + 0.5, y: alto + 0.02, z: z1 - fondo / 2, sinContorno: true, sombra: false }));
+  }
+  // el pasamanos, del lado de adentro
+  const rampa = new THREE.Group();
+  for (let i = 0; i <= largo * 2; i += 1) {
+    const z = hasta + 1 - i * 0.5;
+    const y = Math.min(ALTO_PISO, (i * ALTO_PISO) / (largo * 2));
+    rampa.add(pieza(G.cil(0.03, 0.03, 0.8, 8), C.maderaOscura, { x: x + 0.95, y: y + 0.4, z }));
+  }
+  const ang = Math.atan2(ALTO_PISO, largo);
+  rampa.add(pieza(G.caja(0.08, 0.08, Math.hypot(largo, ALTO_PISO) + 0.1, 0.03), C.maderaOscura, { x: x + 0.95, y: ALTO_PISO / 2 + 0.8, z: desde + largo / 2, rx: ang }));
+  g.add(rampa);
+  return g;
+}
+
+// El cuarto: piso de `lado` x `lado` y dos paredes atrás; con `pisos` = 2, la escalera y
+// el segundo piso encima (con su hueco y su barandal). Devuelve cada piso por separado
+// para poder esconder el de arriba cuando se mira el de abajo.
+export function construirCuarto(lado, { pintura, piso }, { pisos = 1, escalera: esc = null } = {}) {
+  const g = new THREE.Group();
   const tPared = texturaPared(pintura.color, pintura.id);
   tPared.wrapS = THREE.RepeatWrapping;
   tPared.wrapT = THREE.RepeatWrapping;
-  tPared.repeat.set(lado / 2, alto / 2);
+  tPared.repeat.set(lado / 2, ALTO_PARED / 2);
   const matPared = new THREE.MeshToonMaterial({ map: tPared, gradientMap: gradiente() });
-  const izq = pieza(G.cubo(0.3, alto, lado + 0.3), matPared, { x: -0.15, y: alto / 2 - 0.3, z: lado / 2 - 0.15 });
-  izq.userData.pared = 'izq';
-  const der = pieza(G.cubo(lado, alto, 0.3), matPared, { x: lado / 2, y: alto / 2 - 0.3, z: -0.15 });
-  der.userData.pared = 'der';
-  g.add(izq, der);
-  // zócalos y molduras
-  g.add(pieza(G.cubo(0.06, 0.18, lado), C.blanco, { x: 0.03, y: 0.09, z: lado / 2, sombra: false }));
-  g.add(pieza(G.cubo(lado, 0.18, 0.06), C.blanco, { x: lado / 2, y: 0.09, z: 0.03, sombra: false }));
-  g.add(pieza(G.cubo(0.34, 0.12, lado + 0.34), C.blanco, { x: -0.15, y: alto - 0.3, z: lado / 2 - 0.17, sombra: false }));
-  g.add(pieza(G.cubo(lado + 0.04, 0.12, 0.34), C.blanco, { x: lado / 2, y: alto - 0.3, z: -0.15, sombra: false }));
-  return { grupo: g, paredes: [izq, der], suelo, alto: alto - 0.3 };
+
+  // ---- primer piso
+  const abajo = new THREE.Group();
+  abajo.add(sueloDe(lado, lado, piso, { x: lado / 2, y: -0.15, z: lado / 2 }));
+  abajo.add(pieza(G.caja(lado + 0.5, 0.25, lado + 0.5, 0.08), C.maderaOscura, { x: lado / 2 - 0.1, y: -0.42, z: lado / 2 - 0.1, sombra: false }));
+  const p0 = paredes(lado, matPared, 0, 0);
+  abajo.add(p0.grupo);
+  if (pisos >= 2 && esc) abajo.add(escalera(esc));
+  g.add(abajo);
+  const niveles = [{ grupo: abajo, paredes: p0.paredes }];
+
+  // ---- segundo piso
+  if (pisos >= 2 && esc) {
+    const arriba = new THREE.Group();
+    const base = ALTO_PISO;
+    const y = base - 0.15;
+    const hx = esc.x + 1;
+    // el piso, dejando el hueco de la escalera (x de esc.x a hx, z de desde a hasta+1)
+    arriba.add(sueloDe(lado - hx, lado, piso, { x: hx + (lado - hx) / 2, y, z: lado / 2 }));
+    if (esc.desde > 0) arriba.add(sueloDe(hx, esc.desde, piso, { x: hx / 2, y, z: esc.desde / 2 }));
+    if (esc.hasta + 1 < lado) arriba.add(sueloDe(hx, lado - esc.hasta - 1, piso, { x: hx / 2, y, z: (esc.hasta + 1 + lado) / 2 }));
+    // el borde de madera de la losa
+    arriba.add(pieza(G.cubo(lado + 0.3, 0.12, 0.12), C.maderaOscura, { x: lado / 2, y: base - 0.36, z: lado + 0.02, sombra: false }));
+    arriba.add(pieza(G.cubo(0.12, 0.12, lado + 0.3), C.maderaOscura, { x: lado + 0.02, y: base - 0.36, z: lado / 2, sombra: false }));
+    const p1 = paredes(lado, matPared, base, 1);
+    arriba.add(p1.grupo);
+    // el barandal alrededor del hueco
+    const baranda = (x1, z1, x2, z2) => {
+      const largo = Math.hypot(x2 - x1, z2 - z1);
+      const n = Math.max(2, Math.round(largo / 0.33));
+      for (let i = 0; i <= n; i += 1) {
+        const t = i / n;
+        arriba.add(pieza(G.cil(0.025, 0.025, 0.7, 6), C.blanco, { x: x1 + (x2 - x1) * t, y: base + 0.35, z: z1 + (z2 - z1) * t }));
+      }
+      arriba.add(pieza(G.caja(Math.abs(x2 - x1) + 0.08, 0.07, Math.abs(z2 - z1) + 0.08, 0.03), C.maderaClara, { x: (x1 + x2) / 2, y: base + 0.72, z: (z1 + z2) / 2 }));
+    };
+    baranda(hx, esc.desde, hx, esc.hasta + 1);
+    baranda(esc.x + 0.05, esc.hasta + 1, hx, esc.hasta + 1);
+    g.add(arriba);
+    niveles.push({ grupo: arriba, paredes: p1.paredes });
+  }
+  return { grupo: g, niveles, paredes: niveles.flatMap((n) => n.paredes) };
 }
