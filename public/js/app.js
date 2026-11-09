@@ -1,34 +1,27 @@
 import { api, urlDibujo } from './api.js';
-import { h, aviso, hoja, confirmar, lluviaDeCorazones, descargar } from './ui.js';
-import { icono, carita } from './iconos.js';
-import { crearLienzo, GROSOR, FACTOR_BORRADOR } from './lienzo.js';
+import { h, aviso, hoja, confirmar, lluviaDeCorazones } from './ui.js';
+import { icono } from './iconos.js';
 import { controlAvisos, sincronizarAvisos, salirConAvisos } from './avisos.js';
 import { conocerReacciones, emojiDe, pegatina, repegar, burbuja, panelReaccion } from './reacciones.js';
 import { crearPostal, abrirPostal } from './postal.js';
 import { crearMascota } from './mascota.js';
-import { crearRadio } from './radio.js';
+import {
+  app, MESES, DIAS, partes, diaSemana, fechaLarga, fechaCorta, diasEntre, caritaDe, navegar, alNavegar, barraNav,
+  abrirVisor, hayBorrador, limpiarBorradores, monedasGanadas,
+} from './comun.js';
+import { pantallaLienzo } from './dibujar.js';
+import { ponerRacha, rachaInicial, NOMBRES_NIVEL } from './racha.js';
+import { hojaPosponer, tarjetaPospuesto, tarjetaPendiente, explicarPorQueNo, mandarAnimos } from './posponer.js';
+import { tarjetaReto, pantallaReto, modoReto } from './reto.js';
+import { tarjetaPregunta, pantallaNosotros } from './nosotros.js';
+import { mostrarNovedades } from './novedades.js';
 
 const raiz = document.getElementById('app');
 let sesion = null; // { yo, pareja }
 let soltar = null; // limpieza de la pantalla actual
 let generacion = 0;
 
-const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const DIAS_CORTOS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
-
-const partes = (fecha) => fecha.split('-').map(Number);
-const diaSemana = (fecha) => { const [a, m, d] = partes(fecha); return new Date(Date.UTC(a, m - 1, d)).getUTCDay(); };
-function fechaLarga(fecha) {
-  const [, m, d] = partes(fecha);
-  return `${DIAS[diaSemana(fecha)]} ${d} de ${MESES[m - 1]}`;
-}
-
-const caritaDe = (cuenta, clase = '', triste = false) => {
-  const el = h('span', { class: `cara ${clase}`, style: { '--color': cuenta.color } });
-  el.innerHTML = carita(cuenta.carita, cuenta.color, triste);
-  return el;
-};
 
 // Quién soy, quién es mi pareja y la lista de reacciones.
 async function pedirSesion() {
@@ -36,24 +29,10 @@ async function pedirSesion() {
   conocerReacciones(s);
   return s;
 }
+function ponerSesion(s) { sesion = s; app.sesion = s; }
 
-function navegar(ruta) {
-  if (location.hash === `#/${ruta}`) ir(); else location.hash = `#/${ruta}`;
-}
-
-// El borrador de hoy se guarda solo en este aparato (el servidor solo recibe el dibujo terminado).
-const claveBorrador = (fecha) => `garabatos-borrador-${sesion.yo.id}-${fecha}`;
-function hayBorrador(fecha) {
-  try { return localStorage.getItem(claveBorrador(fecha)) !== null; } catch { return false; }
-}
-function limpiarBorradoresViejos(fechaDeHoy) {
-  try {
-    const prefijo = `garabatos-borrador-${sesion.yo.id}-`;
-    for (const k of Object.keys(localStorage)) {
-      if (k.startsWith(prefijo) && k !== claveBorrador(fechaDeHoy)) localStorage.removeItem(k);
-    }
-  } catch { /* sin almacenamiento */ }
-}
+// La clave del borrador del dibujo de un día (en este aparato).
+const claveBorrador = (fecha) => `${sesion.yo.id}-${fecha}`;
 
 // ================================================================== entrada
 function pantallaEntrar(cont) {
@@ -91,7 +70,7 @@ function pantallaEntrar(cont) {
         ocupado = true;
         try {
           await api.entrar(cuenta.id, pin);
-          sesion = await pedirSesion();
+          ponerSesion(await pedirSesion());
           soltarTeclado();
           navegar('hoy');
         } catch (e) {
@@ -152,18 +131,6 @@ function pantallaEntrar(cont) {
   return soltarTeclado;
 }
 
-// ================================================================== navegación inferior
-function barraNav(actual) {
-  const enlace = (ruta, nombre, ic) => h('a', {
-    href: `#/${ruta}`,
-    class: `nav-item ${actual === ruta ? 'activa' : ''}`,
-    'aria-current': actual === ruta ? 'page' : null,
-  }, icono(ic), h('span', null, nombre));
-  return h('nav', { class: 'nav', 'aria-label': 'Secciones' },
-    enlace('hoy', 'Hoy', 'hoy'),
-    enlace('calendario', 'Calendario', 'calendario'));
-}
-
 function botonPerfil() {
   return h('button', {
     type: 'button',
@@ -177,14 +144,14 @@ function botonPerfil() {
         {
           texto: 'Salir',
           clase: 'fresa',
-          onClick: async () => { await salirConAvisos(); sesion = null; navegar('entrar'); },
+          onClick: async () => { await salirConAvisos(); ponerSesion(null); navegar('entrar'); },
         },
       ],
     }),
   }, caritaDe(sesion.yo));
 }
 
-// ================================================================== polaroids y visor
+// ================================================================== polaroids
 // `nota`: la reacción que le dejaron a este dibujo (sale como pegatina en la esquina).
 function polaroid({ src, nombre, giro, alAbrir, nuevo, nota }) {
   return h('button', {
@@ -199,56 +166,17 @@ function polaroid({ src, nombre, giro, alAbrir, nuevo, nota }) {
   pegatina(nota));
 }
 
-// Cuando alguien no dibujó ese día: solo su carita triste.
-function polaroidTriste({ cuenta, giro }) {
+// Cuando alguien no dibujó ese día: solo su carita triste (o desanimada, si lo pospuso).
+function polaroidTriste({ cuenta, giro, pospuso }) {
   return h('div', { class: 'polaroid vacia triste', style: { '--giro': giro } },
-    h('span', { class: 'polaroid-espera', role: 'img', 'aria-label': `${cuenta.nombre} no ha dibujado` }, caritaDe(cuenta, '', true)),
+    h('span', { class: 'polaroid-espera', role: 'img', 'aria-label': `${cuenta.nombre} ${pospuso ? 'lo pospuso' : 'no ha dibujado'}` }, caritaDe(cuenta, '', pospuso ? 'desanimado' : 'triste')),
     h('span', { class: 'polaroid-nombre' }, cuenta.nombre));
-}
-
-// El dibujo se baja como PNG, que se abre en cualquier aplicación (el WebP no siempre).
-async function guardarImagen(src, nombreArchivo) {
-  try {
-    // Se carga como <img> y no con fetch: en el calendario `src` es una dirección blob:
-    // y la CSP (connect-src 'self') no deja hacer fetch a esas.
-    const imagen = await new Promise((ok, fallo) => {
-      const img = new Image();
-      img.onload = () => ok(img);
-      img.onerror = fallo;
-      img.src = src;
-    });
-    const c = document.createElement('canvas');
-    c.width = imagen.naturalWidth;
-    c.height = imagen.naturalHeight;
-    c.getContext('2d').drawImage(imagen, 0, 0);
-    const png = await new Promise((ok) => { c.toBlob(ok, 'image/png'); });
-    descargar(png, `${nombreArchivo}.png`);
-  } catch {
-    aviso('No se pudo guardar la imagen. Mantén presionada la imagen para guardarla.');
-  }
-}
-
-function abrirVisor({ src, nombre, titulo, archivo }) {
-  const visor = h('div', { class: 'visor', role: 'dialog', 'aria-modal': 'true', 'aria-label': `Dibujo de ${nombre}` });
-  const cerrar = () => { visor.classList.add('se-va'); setTimeout(() => visor.remove(), 200); document.removeEventListener('keydown', alTeclado); };
-  function alTeclado(e) { if (e.key === 'Escape') cerrar(); }
-  document.addEventListener('keydown', alTeclado);
-  visor.append(
-    h('div', { class: 'visor-marco' },
-      h('img', { src, alt: `Dibujo de ${nombre}` }),
-      h('p', { class: 'visor-pie' }, `${nombre} · ${titulo}`)),
-    h('div', { class: 'visor-acciones' },
-      h('button', { type: 'button', class: 'boton blanco', onclick: () => guardarImagen(src, archivo) }, icono('descargar'), 'Guardar'),
-      h('button', { type: 'button', class: 'boton sol', onclick: cerrar }, 'Cerrar')),
-  );
-  visor.addEventListener('click', (e) => { if (e.target === visor) cerrar(); });
-  document.body.append(visor);
 }
 
 // Los dos marcos de un día: el mío y el de mi pareja (dibujo o carita triste).
 // `fuente(fecha, cuenta, v)` devuelve de dónde cargar la imagen completa.
 // `notaMia` es lo que mi pareja le dejó a mi dibujo; `notaSuya`, lo que yo le dejé al suyo.
-function marcosDelDia({ fecha, tema, miV, parejaV, nuevo, fuente, notaMia, notaSuya }) {
+function marcosDelDia({ fecha, tema, miV, parejaV, nuevo, fuente, notaMia, notaSuya, pospuse, pospuso }) {
   const abrir = (cuenta, v) => () => abrirVisor({
     src: fuente(fecha, cuenta, v),
     nombre: cuenta.nombre,
@@ -257,17 +185,19 @@ function marcosDelDia({ fecha, tema, miV, parejaV, nuevo, fuente, notaMia, notaS
   });
   const mio = miV
     ? polaroid({ src: fuente(fecha, sesion.yo, miV), nombre: sesion.yo.nombre, giro: '-2.2deg', alAbrir: abrir(sesion.yo, miV), nota: notaMia })
-    : polaroidTriste({ cuenta: sesion.yo, giro: '-2.2deg' });
+    : polaroidTriste({ cuenta: sesion.yo, giro: '-2.2deg', pospuso: pospuse });
   const suyo = parejaV
     ? polaroid({ src: fuente(fecha, sesion.pareja, parejaV), nombre: sesion.pareja.nombre, giro: '2.4deg', alAbrir: abrir(sesion.pareja, parejaV), nuevo, nota: notaSuya })
-    : polaroidTriste({ cuenta: sesion.pareja, giro: '2.4deg' });
+    : polaroidTriste({ cuenta: sesion.pareja, giro: '2.4deg', pospuso });
   return { mio, suyo };
 }
 
 const desdeElServidor = (fecha, cuenta, v) => urlDibujo(fecha, cuenta.id, v);
+let rachaParaPostal = { dias: 0, nivel: 0 };
 
 // El botón "Postal": arma una imagen con los dos dibujos del día. `datos()` se lee al
-// tocarlo, así la postal lleva las reacciones más recientes.
+// tocarlo, así la postal lleva las reacciones más recientes. El fondo de la postal lleva
+// los efectos de la racha de ahora (como el de la app).
 function botonPostal(datos) {
   return h('button', {
     type: 'button',
@@ -280,20 +210,25 @@ function botonPostal(datos) {
       ];
       abrirPostal({
         nombreArchivo: `garabatos-${fecha}`,
-        armar: () => crearPostal({ fechaTexto: `${fechaLarga(fecha)} de ${partes(fecha)[0]}`, tema, dibujos: lados, emojiDe }),
+        armar: () => crearPostal({ fechaTexto: `${fechaLarga(fecha)} de ${partes(fecha)[0]}`, tema, dibujos: lados, emojiDe, racha: rachaParaPostal }),
       });
     },
   }, icono('postal'), 'Postal de los dos');
 }
 
 // Lo que dice Garabatito en la pantalla de Hoy, según cómo va el día.
-function queDiceGarabatito(d) {
+function queDiceGarabatito(d, reto) {
   const p = sesion.pareja.nombre;
   const hora = new Date().getHours();
   const deHoy = (lista) => lista[[...d.fecha].reduce((suma, c) => suma + c.charCodeAt(0), 0) % lista.length];
   const notaMia = d.notas && d.notas.mio;
+  const pos = d.posponer || {};
+  if ((pos.pendientes || []).length) return { texto: '¡Hoy te tocan dos! El que pospusiste y el de hoy ✏️✏️ Que no se pierda la racha.', animo: 'normal' };
+  if (!d.yoListo && pos.mio) return { texto: `Descansa, ${sesion.yo.nombre} 💛 Mañana dibujamos el doble.`, animo: 'dormido' };
+  if (pos.suyo && !d.parejaListo) return { texto: `${p} no puede dibujar hoy… ¿le mandas ánimos? 💛`, animo: 'normal' };
   if (!d.yoListo) {
     if (d.parejaListo) return { texto: `¡${p} ya dibujó! Te está esperando 👀`, animo: 'feliz' };
+    if (d.temaElegidoPor && d.temaElegidoPor !== sesion.yo.id) return { texto: `¡El tema de hoy lo eligió ${p}! 🎲`, animo: 'feliz' };
     if (hora >= 21) return { texto: 'Todavía estás a tiempo: el día termina a medianoche 🌙', animo: 'normal' };
     if (d.racha >= 2) return { texto: `¡Llevan ${d.racha} días seguidos! Que no se rompa la racha 🔥`, animo: 'normal' };
     return {
@@ -310,6 +245,7 @@ function queDiceGarabatito(d) {
   if (!d.parejaV) return { texto: deHoy([`¡Te quedó precioso! Ahora a esperar a ${p} ⏳`, `Guardadito. Cuando ${p} termine, aparece aquí ✨`]), animo: 'feliz' };
   if (notaMia && notaMia.comentario) return { texto: `¡${p} te dejó una notita! Mírala abajo 💌`, animo: 'feliz' };
   if (notaMia && notaMia.reaccion) return { texto: `¡${p} reaccionó a tu dibujo! ${emojiDe(notaMia.reaccion) || ''}`, animo: 'feliz' };
+  if (reto && reto.fase === 'mi_turno') return { texto: `¡Te toca en el reto de la semana! ${reto.emoji} ${reto.nombre}`, animo: 'feliz' };
   const recuperable = (d.perdidos || []).find((x) => x.gratis || (d.comodines && d.comodines.quedan > 0));
   if (recuperable) {
     return recuperable.gratis
@@ -318,21 +254,14 @@ function queDiceGarabatito(d) {
   }
   if (!(d.notas && d.notas.suyo)) return { texto: `¿Qué te pareció el de ${p}? Déjale una reacción 💛`, animo: 'normal' };
   if (hora >= 22 || hora < 5) return { texto: 'Buenas noches… mañana dibujamos otra vez 🌙', animo: 'dormido' };
-  if ([7, 14, 30, 50, 100, 200, 300, 365].includes(d.racha)) return { texto: `¡${d.racha} días seguidos dibujando juntos! Son increíbles 🏆`, animo: 'feliz' };
-  return { texto: deHoy(['¡Qué lindos les quedaron! Mañana más 🌈', '¡Otro día para el álbum! Pueden guardar la postal 📮', 'Hoy vi dos obras de arte 🖼️']), animo: 'feliz' };
+  if ([7, 15, 30, 60, 100, 200, 300, 365].includes(d.racha)) return { texto: `¡${d.racha} días seguidos dibujando juntos! Miren cómo brilla el fondo ✨`, animo: 'feliz' };
+  return { texto: deHoy(['¡Qué lindos les quedaron! Mañana más 🌈', '¡Otro día para el álbum! Pueden guardar la postal 📮', 'Hoy vi dos obras de arte 🖼️', `Con las monedas 🪙 pueden comprarle algo a la casa 🏠`]), animo: 'feliz' };
 }
 
 // ================================================================== comodines
 const comodinesTexto = (n) => (n === 1 ? '1 comodín' : `${n} comodines`);
 const teQuedan = (n) => (n === 1 ? 'Te queda 1' : `Te quedan ${n}`);
-const fechaCorta = (fecha) => `${partes(fecha)[2]} de ${MESES[partes(fecha)[1] - 1]}`;
-// Cuántos días antes de `hoy` es `fecha`.
-function diasAntes(fecha, hoy) {
-  const [a1, m1, d1] = partes(fecha);
-  const [a2, m2, d2] = partes(hoy);
-  return Math.round((Date.UTC(a2, m2 - 1, d2) - Date.UTC(a1, m1 - 1, d1)) / 86400000);
-}
-const nombreCortoDia = (fecha, hoy) => (diasAntes(fecha, hoy) === 1 ? 'Ayer' : `el ${DIAS[diaSemana(fecha)]} ${partes(fecha)[2]}`);
+const nombreCortoDia = (fecha, hoy) => (diasEntre(fecha, hoy) === 1 ? 'Ayer' : `el ${DIAS[diaSemana(fecha)]} ${partes(fecha)[2]}`);
 
 // Al tocar la pastillita 🎟️: qué son y cuántos quedan.
 function explicarComodines(d) {
@@ -346,8 +275,22 @@ function explicarComodines(d) {
         'Si un día se te pasa dibujar, con un comodín puedes dibujarlo después (hasta una semana) y la racha no se rompe.'),
       h('p', { class: 'hoja-texto' },
         `${teQuedan(quedan)} de ${maximo}. Cada mes se recarga 1${proximo ? `: el próximo llega el ${fechaCorta(proximo)}` : ''}.`),
-      h('p', { class: 'hoja-texto chiquito' }, `El dibujo de ayer se puede terminar gratis hasta las ${d.horasDeGracia}:00 a. m.`)),
+      h('p', { class: 'hoja-texto chiquito' }, `El dibujo de ayer se puede terminar gratis hasta las ${d.horasDeGracia}:00 a. m. Un día que pospusiste no se recupera con comodín.`)),
     acciones: [{ texto: 'Entendido', clase: 'sol' }],
+  });
+}
+
+// Al tocar la racha: qué nivel tiene el fondo y cuál sigue.
+function explicarRacha(d) {
+  const siguientes = [[4, 'el fondo se pone rosadito'], [8, 'aparecen corazones'], [16, 'más corazones y chispitas'], [31, 'burbujas de luz'], [60, '¡todo al máximo!']];
+  const prox = siguientes.find(([n]) => d.racha < n);
+  hoja({
+    titulo: `${d.racha} ${d.racha === 1 ? 'día' : 'días'} seguidos 🔥`,
+    contenido: h('div', null,
+      h('p', { class: 'hoja-texto' }, d.nivelRacha ? `El fondo está «${NOMBRES_NIVEL[d.nivelRacha]}». La postal también lo lleva.` : 'Mientras más días seguidos dibujen los dos, más bonito se pone el fondo (y la postal).'),
+      prox && h('p', { class: 'hoja-texto' }, `A los ${prox[0]} días: ${prox[1]}. ¡Faltan ${prox[0] - d.racha}!`),
+      h('p', { class: 'hoja-texto chiquito' }, 'Si un día no pueden, se puede posponer: la racha se congela hasta el día siguiente.')),
+    acciones: [{ texto: '¡A seguir!', clase: 'sol' }],
   });
 }
 
@@ -375,8 +318,9 @@ function tarjetaPerdidos(d) {
 
 // ================================================================== hoy
 async function pantallaHoy(cont, vigente) {
-  let datos = await api.hoy();
+  let [datos, reto, pregunta] = await Promise.all([api.hoy(), api.reto().catch(() => null), api.pregunta().catch(() => null)]);
   if (!vigente()) return undefined;
+  reto = reto && reto.reto;
 
   const pantalla = h('main', { class: 'pantalla hoy' });
   cont.append(pantalla, barraNav('hoy'));
@@ -384,19 +328,19 @@ async function pantallaHoy(cont, vigente) {
   const yaVisto = () => { try { return localStorage.getItem(claveReveal()) === '1'; } catch { return false; } };
   const marcarVisto = () => { try { localStorage.setItem(claveReveal(), '1'); } catch { /* sin almacenamiento */ } };
   const avisos = controlAvisos(sesion);
-  // Estos tres se crean una sola vez y se vuelven a poner en cada repintado, así no se
+  // Estos se crean una sola vez y se vuelven a poner en cada repintado, así no se
   // pierde lo que estés escribiendo en la notita ni se reinicia la mascota.
-  const mascota = crearMascota();
+  const mascota = crearMascota({ saludo: `☁️ ¡Hola, ${sesion.yo.nombre}! Soy el perrito nube 💛` });
   let panel = null;
   let polaroidSuya = null;
   let primeraVez = true;
 
-  const quien = (cuenta, listo) => h('li', { class: `quien ${listo ? 'listo' : ''}` },
-    caritaDe(cuenta, 'chica', !listo),
-    h('span', { class: 'quien-texto' }, h('strong', null, cuenta.nombre), listo ? ' ya dibujó' : ' todavía no dibuja'));
+  const quien = (cuenta, listo, pospuso) => h('li', { class: `quien ${listo ? 'listo' : ''} ${pospuso ? 'pospuso' : ''}` },
+    caritaDe(cuenta, 'chica', listo ? 'normal' : pospuso ? 'desanimado' : 'triste'),
+    h('span', { class: 'quien-texto' }, h('strong', null, cuenta.nombre), listo ? ' ya dibujó' : pospuso ? ' lo pospuso' : ' todavía no dibuja'));
 
   function hablaGarabatito() {
-    const { texto, animo } = queDiceGarabatito(datos);
+    const { texto, animo } = queDiceGarabatito(datos, reto);
     mascota.animo(animo);
     mascota.decir(texto);
   }
@@ -412,38 +356,56 @@ async function pantallaHoy(cont, vigente) {
   function pintar() {
     const { fecha, tema, yoListo, parejaListo, racha, diasParaReinicio } = datos;
     const notas = datos.notas || {};
+    const pos = datos.posponer || {};
+    ponerRacha(datos.nivelRacha);
+    rachaParaPostal = { dias: racha, nivel: datos.nivelRacha || 0 };
     const hijos = [
       h('header', { class: 'cabecera' }, h('p', { class: 'fecha' }, fechaLarga(fecha)), botonPerfil()),
       h('div', { class: 'chips-hoy' },
-        racha > 0 && h('p', { class: 'racha' }, icono('corazon', { relleno: true }), `${racha} ${racha === 1 ? 'día' : 'días'} dibujando juntos`),
+        racha > 0 && h('button', { type: 'button', class: `racha nivel-${datos.nivelRacha || 0}`, onclick: () => explicarRacha(datos) },
+          icono('corazon', { relleno: true }), `${racha} ${racha === 1 ? 'día' : 'días'} dibujando juntos`),
         datos.comodines && h('button', {
           type: 'button', class: 'comodines-chip', onclick: () => explicarComodines(datos),
           'aria-label': `${comodinesTexto(datos.comodines.quedan)}. Toca para saber qué son.`,
-        }, '🎟️ ', comodinesTexto(datos.comodines.quedan))),
+        }, '🎟️ ', comodinesTexto(datos.comodines.quedan)),
+        h('a', { class: 'monedas-chip', href: '#/casa', 'aria-label': `${datos.monedas || 0} monedas para la casa` }, '🪙 ', String(datos.monedas || 0))),
       h('section', { class: `tema ${primeraVez ? 'entra' : ''}`, 'aria-label': 'Tema de hoy' },
         h('p', { class: 'tema-intro' }, 'Hoy toca dibujar'),
-        h('h1', { class: 'tema-texto' }, tema)),
+        h('h1', { class: 'tema-texto' }, tema),
+        datos.temaElegidoPor && h('p', { class: 'tema-eligio' }, datos.temaElegidoPor === sesion.yo.id ? '🎲 Este tema lo elegiste tú' : `🎲 Lo eligió ${sesion.pareja.nombre}`)),
       mascota.el,
+      ...(pos.pendientes || []).map((p) => tarjetaPendiente(p, fecha)),
     ];
 
     if (!yoListo) {
-      hijos.push(
-        h('ul', { class: 'quienes' }, quien(sesion.yo, false), quien(sesion.pareja, parejaListo)),
-        h('a', { href: '#/dibujar', class: 'boton fresa grande' }, icono('pluma'), hayBorrador(fecha) ? 'Seguir dibujando' : '¡A dibujar!'));
+      if (pos.mio) {
+        hijos.push(
+          tarjetaPospuesto({ cuenta: sesion.yo, p: pos.mio, mia: true, extra: h('p', { class: 'pospuesto-nota' }, 'Mañana te tocan dos dibujos: este y el de mañana.') }),
+          h('a', { href: '#/dibujar', class: 'boton blanco grande secundario' }, icono('pluma'), 'Dibujar igual'));
+      } else {
+        hijos.push(
+          h('ul', { class: 'quienes' }, quien(sesion.yo, false, false), quien(sesion.pareja, parejaListo, Boolean(pos.suyo))),
+          h('a', { href: '#/dibujar', class: 'boton fresa grande' }, icono('pluma'), hayBorrador(claveBorrador(fecha)) ? 'Seguir dibujando' : '¡A dibujar!'),
+          h('button', {
+            type: 'button', class: `posponer-boton ${pos.puedo ? '' : 'no-se-puede'}`,
+            onclick: () => (pos.puedo ? hojaPosponer({ motivos: pos.motivos, largoTexto: pos.largoTexto, alListo: refrescar }) : explicarPorQueNo(pos.porque)),
+          }, icono('luna'), 'Hoy no puedo… posponer'));
+      }
     } else {
       const nuevo = Boolean(datos.parejaV) && !yaVisto();
       const { mio, suyo } = marcosDelDia({
-        fecha, tema, miV: datos.miV, parejaV: datos.parejaV, nuevo, fuente: desdeElServidor, notaMia: notas.mio, notaSuya: notas.suyo,
+        fecha, tema, miV: datos.miV, parejaV: datos.parejaV, nuevo, fuente: desdeElServidor, notaMia: notas.mio, notaSuya: notas.suyo, pospuso: Boolean(pos.suyo),
       });
       polaroidSuya = datos.parejaV ? suyo : null;
       if (datos.parejaV) {
         if (!panel || panel.fecha !== fecha) panel = panelReaccion({ fecha, pareja: sesion.pareja, nota: notas.suyo, alCambiar: alReaccionar });
         else panel.actualizar(notas.suyo);
       }
+      const esperando = pos.suyo ? `${sesion.pareja.nombre} pospuso el suyo: lo verás cuando lo haga (mañana).` : `Cuando ${sesion.pareja.nombre} termine el suyo, aparece aquí.`;
       hijos.push(
         h('section', { class: 'revelado' },
           h('h2', { class: 'revelado-titulo' }, datos.parejaV ? 'Los dibujos de hoy' : 'Tu dibujo ya está guardado'),
-          !datos.parejaV && h('p', { class: 'revelado-texto' }, `Cuando ${sesion.pareja.nombre} termine el suyo, aparece aquí.`),
+          !datos.parejaV && h('p', { class: 'revelado-texto' }, esperando),
           h('div', { class: 'polaroids' }, mio, suyo),
           burbuja(sesion.pareja, notas.mio),
           datos.parejaV && panel.el,
@@ -456,6 +418,11 @@ async function pantallaHoy(cont, vigente) {
       }
     }
 
+    if (pos.suyo) hijos.push(tarjetaPospuesto({ cuenta: sesion.pareja, p: pos.suyo, mia: false, alAnimar: mandarAnimos }));
+    if ((pos.suyosPendientes || []).length) {
+      hijos.push(h('p', { class: 'nota-suave' }, `⏰ Hoy ${sesion.pareja.nombre} tiene que hacer también el que pospuso ayer.`));
+    }
+    hijos.push(reto && tarjetaReto(reto), pregunta && tarjetaPregunta(pregunta, { alCambiar: (p) => { pregunta = p; } }));
     hijos.push(tarjetaPerdidos(datos), avisos.el);
 
     if (diasParaReinicio <= 30) {
@@ -471,17 +438,18 @@ async function pantallaHoy(cont, vigente) {
 
   async function refrescar() {
     try {
-      const nuevo = await api.hoy();
+      const [nuevo, r] = await Promise.all([api.hoy(), api.reto().catch(() => null)]);
       if (!vigente()) return;
       datos = nuevo;
+      if (r) reto = r.reto;
       pintar();
     } catch (e) {
-      if (e.estado === 401) { sesion = null; navegar('entrar'); }
+      if (e.estado === 401) { ponerSesion(null); navegar('entrar'); }
     }
   }
 
   // Si ya terminé, el borrador local sobra.
-  if (datos.yoListo) { try { localStorage.removeItem(claveBorrador(datos.fecha)); } catch { /* nada */ } }
+  if (datos.yoListo) limpiarBorradores(claveBorrador(datos.fecha));
 
   pintar();
   // Si ya terminé y mi pareja todavía no, reviso cada rato si ya lo hizo.
@@ -494,402 +462,52 @@ async function pantallaHoy(cont, vigente) {
 }
 
 // ================================================================== dibujar
-// Cuatro grupos de 12 colores; con las flechas se pasa de uno a otro.
-const PALETAS = [
-  {
-    nombre: 'Normales',
-    colores: [
-      ['negro', '#2b2220'], ['gris', '#8c8794'], ['café', '#8a5a3c'], ['piel', '#ffd0b5'],
-      ['rojo', '#e8424a'], ['naranja', '#ff8a3d'], ['amarillo', '#ffd23f'], ['verde', '#4cc26b'],
-      ['turquesa', '#3fd0c9'], ['azul', '#3d8bff'], ['morado', '#8f5cff'], ['rosa', '#ff7fb0'],
-    ],
-  },
-  {
-    nombre: 'Suaves', // poco saturados: como de acuarela o de libro viejo
-    colores: [
-      ['gris pizarra', '#5b5866'], ['gris topo', '#a39a92'], ['arena', '#c9ad8b'], ['canela', '#b9805e'],
-      ['terracota', '#b65c4f'], ['mostaza', '#c9a24a'], ['amarillo pálido', '#ecdca2'], ['verde oliva', '#8a9a5b'],
-      ['verde salvia', '#9db89a'], ['azul grisáceo', '#7393ab'], ['malva', '#9d89ab'], ['rosa viejo', '#c98d98'],
-    ],
-  },
-  {
-    nombre: 'Vivos', // muy saturados
-    colores: [
-      ['rojo intenso', '#ff1a3c'], ['naranja fuego', '#ff6a00'], ['amarillo limón', '#ffe500'], ['verde lima', '#8cf000'],
-      ['verde fuerte', '#00b14f'], ['verde azulado', '#00a99d'], ['cian', '#00cfff'], ['azul eléctrico', '#0050ff'],
-      ['azul marino', '#1b2490'], ['violeta', '#8a00ff'], ['magenta', '#ff00c3'], ['carmesí', '#b0002d'],
-    ],
-  },
-  {
-    nombre: 'Pastel',
-    colores: [
-      ['rosa pastel', '#ffc2d6'], ['durazno', '#ffd1ad'], ['amarillo pastel', '#ffe88f'], ['pistacho', '#d6eda1'],
-      ['menta', '#b5efcf'], ['aqua', '#a9ebe6'], ['celeste', '#bfe2ff'], ['azul bebé', '#a8c6ff'],
-      ['lavanda', '#d5c5ff'], ['lila', '#ebb9f2'], ['coral pastel', '#ffb4a8'], ['gris perla', '#d4cfdd'],
-    ],
-  },
-];
-const TODOS_LOS_COLORES = new Set(PALETAS.flatMap((p) => p.colores.map(([, hex]) => hex)));
-// Lo que hace el botón de dibujo: [herramienta, nombre, ícono, ayudita]
-const MODOS_DIBUJO = [
-  ['pluma', 'Pincel', 'pluma', 'Trazos a mano'],
-  ['balde', 'Balde', 'balde', 'Rellena una zona'],
-];
-const FORMAS = [['linea', 'Línea'], ['circulo', 'Círculo'], ['cuadrado', 'Cuadrado'], ['triangulo', 'Triángulo'], ['corazon', 'Corazón'], ['estrella', 'Estrella']];
-
-// El grupo de colores, el color y el tamaño del pincel se recuerdan en cada aparato.
-const CLAVE_PINCEL = 'garabatos-pincel';
-function pincelGuardado() {
-  let p = {};
-  try { p = JSON.parse(localStorage.getItem(CLAVE_PINCEL)) || {}; } catch { /* sin almacenamiento */ }
-  const grosor = Number(p.grosor);
-  return {
-    grupo: Number.isInteger(p.grupo) && p.grupo >= 0 && p.grupo < PALETAS.length ? p.grupo : 0,
-    color: TODOS_LOS_COLORES.has(p.color) ? p.color : null,
-    grosor: grosor >= GROSOR.min && grosor <= GROSOR.max ? grosor : GROSOR.inicial,
-  };
-}
-function guardarPincel(datos) {
-  try { localStorage.setItem(CLAVE_PINCEL, JSON.stringify(datos)); } catch { /* sin almacenamiento */ }
-}
-
-// La barra va de 0 a 100 pero el grosor crece en curva: así hay más control en los
-// tamaños finos (de 2 a 12 en la primera mitad) y aun así se llega a uno bien grueso.
-const RAZON = GROSOR.max / GROSOR.min;
-const grosorDeBarra = (v) => Math.round(GROSOR.min * RAZON ** (v / 100) * 10) / 10;
-const barraDeGrosor = (g) => Math.round((100 * Math.log(g / GROSOR.min)) / Math.log(RAZON));
-const nombreDeGrosor = (v) => (v < 22 ? 'muy fino' : v < 42 ? 'fino' : v < 60 ? 'mediano' : v < 80 ? 'grueso' : 'muy grueso');
-
-function cargarImagen(url) {
-  return new Promise((ok, fallo) => {
-    const img = new Image();
-    img.onload = () => ok(img);
-    img.onerror = fallo;
-    img.src = url;
-  });
-}
-
-// `fechaRecuperar`: dibujar un día que se te pasó (con un comodín, o gratis si es el de
-// ayer y todavía es de madrugada).
-async function pantallaDibujar(cont, vigente, fechaRecuperar) {
+// El dibujo del día. `fechaRecuperar`: dibujar un día que se te pasó (con un comodín, o
+// gratis si es el de ayer y todavía es de madrugada) o uno que pospusiste (gratis).
+async function modoDiario(fechaRecuperar) {
   const datos = await api.hoy();
-  if (!vigente()) return undefined;
+  ponerRacha(datos.nivelRacha);
   let recuperando = null;
+  let pospuesto = null;
   if (fechaRecuperar) {
-    recuperando = (datos.perdidos || []).find((p) => p.fecha === fechaRecuperar) || null;
-    if (!recuperando || (!recuperando.gratis && datos.comodines.quedan < 1)) {
+    pospuesto = ((datos.posponer || {}).pendientes || []).find((p) => p.fecha === fechaRecuperar) || null;
+    recuperando = pospuesto ? null : (datos.perdidos || []).find((p) => p.fecha === fechaRecuperar) || null;
+    if (!pospuesto && (!recuperando || (!recuperando.gratis && datos.comodines.quedan < 1))) {
       aviso(recuperando ? 'No te quedan comodines para recuperar ese día.' : 'Ese día ya no se puede dibujar.', 3600);
       navegar('hoy');
-      return undefined;
+      return null;
     }
-  } else if (datos.yoListo) { navegar('hoy'); return undefined; }
+  } else if (datos.yoListo) { navegar('hoy'); return null; }
 
-  const { fecha, tema } = recuperando || datos;
-  const claveLocal = claveBorrador(fecha);
-  if (!recuperando) limpiarBorradoresViejos(fecha);
-  document.body.classList.add('modo-dibujo');
-  if (recuperando) {
-    setTimeout(() => aviso(`🎟️ Estás dibujando el del ${fechaLarga(fecha)}`, 3600), 400);
+  const { fecha, tema } = pospuesto || recuperando || datos;
+  if (!fechaRecuperar) {
+    // Se guardan solo los borradores de días que todavía se pueden dibujar.
+    const vigentes = [fecha, ...(datos.perdidos || []).map((p) => p.fecha), ...((datos.posponer || {}).pendientes || []).map((p) => p.fecha)].map(claveBorrador);
+    limpiarBorradores(`${sesion.yo.id}-`, vigentes);
   }
 
-  // ---- armado de la pantalla
-  const caja = h('div', { class: 'lienzo-caja' });
-  const area = h('div', { class: 'area-lienzo' }, caja);
-  let lienzo;
-  let sucio = false;
-  let temporizador = null;
-  let terminando = false;
-  let cerrado = false; // ya se terminó (o ya estaba terminado): no hay que guardar más borradores
-
-  const botones = {};
-  function boton(clave, nombre, ic, alPulsar, extra = {}) {
-    const b = h('button', { type: 'button', class: `herramienta ${extra.clase || ''}`, 'aria-label': nombre, title: nombre, onclick: alPulsar }, icono(ic), h('span', { class: 'herramienta-nombre' }, extra.texto || nombre));
-    botones[clave] = b;
-    return b;
-  }
-
-  // Selectores que aparecen sobre el lienzo: el de formas y el de pincel/balde.
-  let selectorAbierto = null; // { el, de: 'formas' | 'dibujo' }
-  function cerrarSelector() { selectorAbierto?.el.remove(); selectorAbierto = null; }
-
-  // Pincel o balde. El último elegido se recuerda mientras dure este dibujo.
-  let modoDibujo = 'pluma';
-  let explicoBalde = false;
-  function abrirSelectorDibujo() {
-    cerrarSelector();
-    const el = h('div', { class: 'selector-formas selector-dibujo', role: 'group', 'aria-label': 'Pincel o balde' },
-      h('div', { class: 'modos-fila' }, MODOS_DIBUJO.map(([id, nombre, ic, ayuda]) => h('button', {
-        type: 'button', class: `modo ${id === lienzo.estado.herramienta ? 'activa' : ''}`, 'aria-pressed': id === lienzo.estado.herramienta,
-        onclick: () => {
-          modoDibujo = id;
-          lienzo.estado.herramienta = id;
-          actualizarHerramientas();
-          cerrarSelector();
-          if (id === 'balde' && !explicoBalde) { explicoBalde = true; aviso('Toca una zona para rellenarla 🪣'); }
-        },
-      }, icono(ic), h('span', { class: 'modo-nombre' }, nombre), h('span', { class: 'modo-ayuda' }, ayuda)))));
-    selectorAbierto = { el, de: 'dibujo' };
-    area.append(el);
-  }
-
-  function abrirSelector() {
-    cerrarSelector();
-    const elegida = lienzo.estado.forma;
-    const selectorForma = h('div', { class: 'selector-formas', role: 'group', 'aria-label': 'Formas' },
-      h('div', { class: 'formas-fila' }, FORMAS.map(([id, nombre]) => h('button', {
-        type: 'button', class: `forma ${id === elegida ? 'activa' : ''}`, 'aria-label': nombre, 'aria-pressed': id === elegida, title: nombre,
-        onclick: () => { lienzo.estado.forma = id; actualizarHerramientas(); cerrarSelector(); },
-      }, icono(id)))),
-      h('div', { class: 'relleno-fila' },
-        h('button', { type: 'button', class: `chip ${!lienzo.estado.relleno ? 'activa' : ''}`, onclick: () => { lienzo.estado.relleno = false; abrirSelector(); } }, 'Contorno'),
-        h('button', { type: 'button', class: `chip ${lienzo.estado.relleno ? 'activa' : ''}`, onclick: () => { lienzo.estado.relleno = true; abrirSelector(); } }, 'Relleno')));
-    selectorAbierto = { el: selectorForma, de: 'formas' };
-    area.append(selectorForma);
-  }
-
-  const dibujando = () => lienzo.estado.herramienta === 'pluma' || lienzo.estado.herramienta === 'balde';
-
-  function elegirHerramienta(nombre) {
-    // El botón de dibujo siempre muestra las dos opciones (pincel y balde).
-    if (nombre === 'dibujo') {
-      if (dibujando()) {
-        if (selectorAbierto?.de === 'dibujo') cerrarSelector(); else abrirSelectorDibujo();
-        return;
-      }
-      lienzo.estado.herramienta = modoDibujo;
-      actualizarHerramientas();
-      abrirSelectorDibujo();
-      return;
-    }
-    if (nombre === 'formas' && lienzo.estado.herramienta === 'formas') {
-      if (selectorAbierto?.de === 'formas') cerrarSelector(); else abrirSelector();
-      return;
-    }
-    lienzo.estado.herramienta = nombre;
-    cerrarSelector();
-    actualizarHerramientas();
-    if (nombre === 'formas') abrirSelector();
-  }
-
-  function actualizarHerramientas() {
-    const e = lienzo.estado;
-    const activos = { pluma: dibujando(), formas: e.herramienta === 'formas', borrador: e.herramienta === 'borrador' };
-    for (const t of ['pluma', 'formas', 'borrador']) {
-      botones[t].classList.toggle('activa', activos[t]);
-      botones[t].setAttribute('aria-pressed', activos[t]);
-    }
-    const [, nombreModo, iconoModo] = MODOS_DIBUJO.find(([id]) => id === modoDibujo);
-    botones.pluma.replaceChildren(icono(iconoModo), h('span', { class: 'herramienta-nombre' }, nombreModo));
-    botones.pluma.setAttribute('aria-label', `${nombreModo} (toca para elegir pincel o balde)`);
-    botones.formas.replaceChildren(icono(e.forma), h('span', { class: 'herramienta-nombre' }, 'Formas'));
-    for (const el of dock.querySelectorAll('.color')) {
-      const activo = el.dataset.color === e.color;
-      el.classList.toggle('activa', activo);
-      el.setAttribute('aria-pressed', activo);
-    }
-    actualizarPincel();
-  }
-
-  // ---- colores por grupos (con flechas) y barra del tamaño del pincel
-  const pincel = pincelGuardado();
-  let grupo = pincel.grupo;
-  const nombreGrupo = h('span', { class: 'paleta-nombre-texto' });
-  const puntitos = h('span', { class: 'paleta-puntos', 'aria-hidden': 'true' }, PALETAS.map(() => h('i')));
-  const coloresEl = h('div', { class: 'colores', role: 'group' });
-  const recordarPincel = () => guardarPincel({ grupo, color: lienzo.estado.color, grosor: lienzo.estado.grosor });
-
-  function elegirColor(hex) {
-    lienzo.estado.color = hex;
-    if (lienzo.estado.herramienta === 'borrador') lienzo.estado.herramienta = modoDibujo;
-    actualizarHerramientas();
-    recordarPincel();
-  }
-
-  function pintarColores(paso = 0) {
-    const paleta = PALETAS[grupo];
-    nombreGrupo.textContent = paleta.nombre;
-    [...puntitos.children].forEach((p, i) => p.classList.toggle('activo', i === grupo));
-    coloresEl.setAttribute('aria-label', `Colores ${paleta.nombre.toLowerCase()}`);
-    coloresEl.replaceChildren(...paleta.colores.map(([nombre, hex]) => h('button', {
-      type: 'button', class: 'color', 'data-color': hex, style: { '--tono': hex }, 'aria-label': nombre, title: nombre,
-      onclick: () => elegirColor(hex),
-    }, h('span', { class: 'color-punto' }))));
-    if (paso) {
-      coloresEl.classList.remove('desde-izq', 'desde-der');
-      void coloresEl.offsetWidth;
-      coloresEl.classList.add(paso > 0 ? 'desde-der' : 'desde-izq');
-    }
-  }
-
-  function cambiarGrupo(paso) {
-    grupo = (grupo + paso + PALETAS.length) % PALETAS.length;
-    pintarColores(paso);
-    actualizarHerramientas();
-    recordarPincel();
-  }
-
-  const flechaColores = (paso, nombre) => h('button', {
-    type: 'button', class: `paleta-flecha ${paso > 0 ? 'derecha' : ''}`, 'aria-label': nombre, title: nombre, onclick: () => cambiarGrupo(paso),
-  }, icono('volver'));
-
-  const barraPincel = h('input', {
-    type: 'range', class: 'pincel-barra', min: '0', max: '100', step: '1', 'aria-label': 'Tamaño del pincel',
-    oninput: (e) => { lienzo.estado.grosor = grosorDeBarra(Number(e.target.value)); actualizarPincel(); },
-    onchange: () => recordarPincel(),
-  });
-  const puntoPincel = h('span', { class: 'pincel-punto' });
-  const filaPincel = h('div', { class: 'pincel' },
-    h('span', { class: 'pincel-chico', 'aria-hidden': 'true' }),
-    barraPincel,
-    h('span', { class: 'pincel-muestra', 'aria-hidden': 'true' }, puntoPincel));
-
-  // La bolita de la derecha muestra el tamaño real del trazo en la pantalla, en su color.
-  // Con el balde el tamaño no importa: la barra se ve apagadita.
-  function actualizarPincel() {
-    if (!lienzo) return;
-    const e = lienzo.estado;
-    filaPincel.classList.toggle('apagada', e.herramienta === 'balde');
-    const borrar = e.herramienta === 'borrador';
-    const valor = barraDeGrosor(e.grosor);
-    if (Number(barraPincel.value) !== valor) barraPincel.value = String(valor);
-    barraPincel.style.setProperty('--lleno', `${valor}%`);
-    barraPincel.setAttribute('aria-valuetext', nombreDeGrosor(valor));
-    const enPantalla = e.grosor * (borrar ? FACTOR_BORRADOR : 1) * (lienzo.escala() || 0.3);
-    const diametro = `${Math.max(3, Math.min(40, enPantalla))}px`;
-    puntoPincel.style.width = diametro;
-    puntoPincel.style.height = diametro;
-    puntoPincel.style.background = borrar ? '' : e.color;
-    puntoPincel.classList.toggle('borrador', borrar);
-  }
-
-  pintarColores();
-
-  const dock = h('div', { class: 'dock' },
-    h('div', { class: 'herramientas' },
-      boton('pluma', 'Pincel', 'pluma', () => elegirHerramienta('dibujo')),
-      boton('formas', 'Formas', 'corazon', () => elegirHerramienta('formas')),
-      boton('borrador', 'Borrador', 'borrador', () => elegirHerramienta('borrador')),
-      boton('deshacer', 'Deshacer', 'deshacer', () => lienzo.deshacer(), { clase: 'accion separada' }),
-      boton('rehacer', 'Rehacer', 'rehacer', () => lienzo.rehacer(), { clase: 'accion' }),
-      boton('limpiar', 'Borrar todo', 'basura', async () => {
-        if (lienzo.estaVacio()) return;
-        const si = await confirmar({ titulo: '¿Borrar todo el dibujo?', texto: 'Si te arrepientes, la flecha de deshacer lo trae de vuelta.', no: 'Cancelar', si: 'Borrar todo' });
-        if (si) lienzo.limpiar();
-      }, { clase: 'accion' })),
-    h('div', { class: 'paleta' },
-      h('p', { class: 'paleta-nombre', 'aria-live': 'polite' }, nombreGrupo, puntitos),
-      h('div', { class: 'paleta-fila' },
-        flechaColores(-1, 'Colores anteriores'), coloresEl, flechaColores(1, 'Más colores')),
-      filaPincel));
-
-  const botonTerminar = h('button', { type: 'button', class: 'boton fresa chico', onclick: pedirTerminar }, icono('check'), 'Terminar');
-  // La radio vive solo en esta pantalla: al salir (o al terminar) se apaga.
-  const radio = crearRadio();
-
-  const pantalla = h('main', { class: 'pantalla dibujar' },
-    h('header', { class: 'dibujar-cabecera' },
-      h('button', { type: 'button', class: 'volver', 'aria-label': 'Volver a Hoy', onclick: volver }, icono('volver')),
-      h('button', {
-        type: 'button', class: `tema-chip ${recuperando ? 'recuperando' : ''}`, title: tema,
-        onclick: () => aviso(recuperando ? `${fechaLarga(fecha)}: ${tema}` : tema, 4000),
-      }, h('span', { class: 'tema-chip-texto' }, recuperando ? `🎟️ ${tema}` : tema)),
-      radio.boton,
-      botonTerminar),
-    area,
-    dock,
-    radio.panel);
-  cont.append(pantalla);
-
-  lienzo = crearLienzo(caja, {
-    alCambiar: ({ puedeDeshacer, puedeRehacer }) => {
-      botones.deshacer.disabled = !puedeDeshacer;
-      botones.rehacer.disabled = !puedeRehacer;
-      programarGuardado();
-    },
-  });
-  botones.deshacer.disabled = true;
-  botones.rehacer.disabled = true;
-  lienzo.estado.grosor = pincel.grosor;
-  if (pincel.color) lienzo.estado.color = pincel.color;
-  actualizarHerramientas();
-  // Si la pantalla gira, el lienzo cambia de tamaño y la bolita del pincel también.
-  window.addEventListener('resize', actualizarPincel);
-
-  // ---- borrador en este aparato (no viaja a internet hasta que pulsas "Terminar")
-  function programarGuardado() {
-    sucio = true;
-    clearTimeout(temporizador);
-    temporizador = setTimeout(guardarLocal, 1200);
-  }
-
-  function guardarLocal() {
-    clearTimeout(temporizador);
-    if (!sucio || cerrado || terminando) return;
-    sucio = false;
-    try {
-      localStorage.setItem(claveLocal, JSON.stringify({ t: Date.now(), img: lienzo.exportarBorrador() }));
-    } catch { /* sin espacio o sin almacenamiento: se sigue sin borrador */ }
-  }
-
-  const alOcultar = () => { if (document.hidden) guardarLocal(); };
-  document.addEventListener('visibilitychange', alOcultar);
-  window.addEventListener('pagehide', guardarLocal);
-
-  // ---- recuperar lo que ya se había dibujado hoy en este aparato
-  try {
-    const guardado = JSON.parse(localStorage.getItem(claveLocal) || 'null');
-    if (guardado?.img) {
-      const img = await cargarImagen(guardado.img);
-      if (!vigente()) { radio.destruir(); window.removeEventListener('resize', actualizarPincel); return undefined; }
-      lienzo.cargarBase(img);
-    }
-  } catch { /* se empieza en blanco */ }
-
-  // ---- terminar
   // ¿Este dibujo gasta un comodín? (el de ayer es gratis solo hasta las `horasDeGracia`)
   const cuestaComodin = () => Boolean(recuperando) && !(recuperando.gratis && new Date().getHours() < datos.horasDeGracia);
 
-  async function pedirTerminar() {
-    if (terminando) return;
-    if (lienzo.estaVacio()) { aviso('Dibuja algo antes de terminar.'); return; }
-    const quedan = datos.comodines.quedan;
-    const si = await confirmar(recuperando
-      ? {
-        titulo: `¿Terminar el dibujo del ${fechaLarga(fecha)}?`,
-        texto: cuestaComodin()
-          ? `Se usará 1 comodín 🎟️ (te ${quedan === 1 ? 'queda 1' : `quedan ${quedan}`}; después, ${quedan - 1}). Ya no se podrá cambiar.`
-          : 'Todavía es gratis: no gasta comodín. Ya no se podrá cambiar.',
-        no: 'Seguir dibujando', si: cuestaComodin() ? 'Usar comodín' : 'Terminar',
-      }
-      : {
-        titulo: '¿Terminar el dibujo de hoy?',
-        texto: `Después ya no se puede cambiar. ${sesion.pareja.nombre} podrá verlo cuando termine el suyo.`,
-        no: 'Seguir dibujando', si: 'Terminar',
-      });
-    if (!si) return;
-    await guardarDibujo(Boolean(recuperando));
-  }
-
-  async function guardarDibujo(conComodin) {
-    terminando = true;
-    clearTimeout(temporizador);
-    botonTerminar.disabled = true;
-    botonTerminar.lastChild.textContent = 'Guardando…';
+  async function guardar(lienzo, ui, conComodin) {
+    ui.ocupado(true);
     try {
-      await api.terminar({ fecha, imagen: lienzo.exportarFinal(), ...(conComodin ? { comodin: true } : {}) });
-      cerrado = true;
-      try { localStorage.removeItem(claveLocal); } catch { /* nada */ }
+      const r = await api.terminar({ fecha, imagen: lienzo.exportarFinal(), ...(conComodin ? { comodin: true } : {}) });
       if (recuperando) setTimeout(() => aviso('¡Día recuperado! 🎟️ La racha sigue.', 3600), 300);
-      navegar('hoy');
+      if (pospuesto) setTimeout(() => aviso('¡Listo el que pospusiste! 💪 La racha sigue.', 3600), 300);
+      monedasGanadas(r.monedas);
+      return true;
     } catch (e) {
-      terminando = false;
-      botonTerminar.disabled = false;
-      botonTerminar.lastChild.textContent = 'Terminar';
-      if (e.estado === 409) { cerrado = true; try { localStorage.removeItem(claveLocal); } catch { /* nada */ } navegar('hoy'); return; }
-      if (e.estado === 401) { sesion = null; navegar('entrar'); return; }
+      ui.ocupado(false);
+      if (e.estado === 409) return true;
+      if (e.estado === 401) { ponerSesion(null); navegar('entrar'); return false; }
       if (e.estado === 403 && e.datos.error === 'sin_comodines') {
         aviso('Ya no te quedan comodines 😿 El dibujo queda guardado solo en este aparato.', 4800);
-        return;
+        return false;
+      }
+      if (e.estado === 400 && e.datos.error === 'pospuesto_vencido') {
+        aviso('Ya pasó el plazo del día pospuesto 😿 Ese ya no se puede guardar.', 4800);
+        return false;
       }
       // Empezaste ayer, la medianoche te agarró dibujando y ya pasó la hora de gracia:
       // se puede guardar igual, con un comodín.
@@ -901,29 +519,45 @@ async function pantallaDibujar(cont, vigente, fechaRecuperar) {
             : 'No te quedan comodines, así que no se puede guardar 😿',
           no: 'Ahora no', si: datos.comodines.quedan > 0 ? 'Usar comodín' : 'Entendido',
         });
-        if (usar && datos.comodines.quedan > 0) await guardarDibujo(true);
-        return;
+        if (usar && datos.comodines.quedan > 0) return guardar(lienzo, ui, true);
+        return false;
       }
       aviso(e.estado === 400
         ? 'No se pudo guardar: el dibujo no es válido. Prueba a terminar de nuevo.'
         : 'No se pudo guardar el dibujo. Revisa la conexión e inténtalo otra vez.', 4200);
+      return false;
     }
   }
 
-  function volver() {
-    guardarLocal();
-    navegar('hoy');
-  }
-
-  return () => {
-    document.removeEventListener('visibilitychange', alOcultar);
-    window.removeEventListener('pagehide', guardarLocal);
-    window.removeEventListener('resize', actualizarPincel);
-    cerrarSelector();
-    guardarLocal();
-    lienzo.destruir();
-    radio.destruir();
-    document.body.classList.remove('modo-dibujo');
+  const quedan = datos.comodines.quedan;
+  return {
+    chip: {
+      texto: pospuesto ? `⏰ ${tema}` : recuperando ? `🎟️ ${tema}` : tema,
+      clase: pospuesto || recuperando ? 'recuperando' : '',
+      alTocar: () => aviso(pospuesto || recuperando ? `${fechaLarga(fecha)}: ${tema}` : tema, 4000),
+    },
+    borrador: claveBorrador(fecha),
+    alEntrar: pospuesto ? `⏰ Estás haciendo el que pospusiste (${fechaLarga(fecha)})` : recuperando ? `🎟️ Estás dibujando el del ${fechaLarga(fecha)}` : null,
+    volver: 'hoy',
+    async terminar(lienzo, ui) {
+      const si = await confirmar(pospuesto
+        ? { titulo: '¿Terminar el que pospusiste?', texto: 'No gasta comodín. Después ya no se puede cambiar.', no: 'Seguir dibujando', si: 'Terminar' }
+        : recuperando
+          ? {
+            titulo: `¿Terminar el dibujo del ${fechaLarga(fecha)}?`,
+            texto: cuestaComodin()
+              ? `Se usará 1 comodín 🎟️ (te ${quedan === 1 ? 'queda 1' : `quedan ${quedan}`}; después, ${quedan - 1}). Ya no se podrá cambiar.`
+              : 'Todavía es gratis: no gasta comodín. Ya no se podrá cambiar.',
+            no: 'Seguir dibujando', si: cuestaComodin() ? 'Usar comodín' : 'Terminar',
+          }
+          : {
+            titulo: '¿Terminar el dibujo de hoy?',
+            texto: `Después ya no se puede cambiar. ${sesion.pareja.nombre} podrá verlo cuando termine el suyo.`,
+            no: 'Seguir dibujando', si: 'Terminar',
+          });
+      if (!si) return false;
+      return guardar(lienzo, ui, Boolean(recuperando));
+    },
   };
 }
 
@@ -942,9 +576,13 @@ function papelDeCarga() {
   return { papel, avance: (n, total) => { contador.textContent = total ? `${n} de ${total} ${total === 1 ? 'dibujo' : 'dibujos'}` : ''; } };
 }
 
+const MOTIVO_TEXTO = { ocupado: 'estaba ocupado', mal: 'se sentía mal' };
+
 async function pantallaCalendario(cont, vigente) {
   const hoyDatos = await api.hoy();
   if (!vigente()) return undefined;
+  ponerRacha(hoyDatos.nivelRacha);
+  rachaParaPostal = { dias: hoyDatos.racha, nivel: hoyDatos.nivelRacha || 0 };
 
   const pantalla = h('main', { class: 'pantalla calendario' });
   cont.append(pantalla, barraNav('calendario'));
@@ -974,10 +612,12 @@ async function pantallaCalendario(cont, vigente) {
   function abrirDia(d) {
     const visible = Boolean(d.pareja && d.pareja.visible);
     const notaMia = (d.yo && d.yo.nota) || null;
+    const posp = d.pospuesto || {};
     const { mio, suyo } = marcosDelDia({
       fecha: d.fecha, tema: d.tema,
       miV: d.yo?.v, parejaV: visible ? d.pareja.v : null,
       fuente: fuenteLocal, notaMia, notaSuya: visible ? d.pareja.nota : null,
+      pospuse: Boolean(posp.yo), pospuso: Boolean(posp.pareja),
     });
     // Si reacciono aquí, se guarda en `d` para que al volver a abrir el día ya esté.
     const panel = visible && panelReaccion({
@@ -986,12 +626,17 @@ async function pantallaCalendario(cont, vigente) {
       nota: d.pareja.nota,
       alCambiar: (nota) => { d.pareja.nota = nota; repegar(suyo, nota); },
     });
-    // ¿Se me pasó este día y todavía lo puedo recuperar?
+    // ¿Se me pasó este día y todavía lo puedo recuperar? (o lo pospuse y estoy a tiempo)
     const perdido = !d.yo && (hoyDatos.perdidos || []).find((p) => p.fecha === d.fecha);
+    const pendiente = !d.yo && ((hoyDatos.posponer || {}).pendientes || []).find((p) => p.fecha === d.fecha);
     const puedoRecuperar = perdido && (perdido.gratis || hoyDatos.comodines.quedan > 0);
-    const recuperados = [
+    const notas = [
+      d.temaElegidoPor && (d.temaElegidoPor === sesion.yo.id ? '🎲 Ese tema lo elegiste tú.' : `🎲 Ese tema lo eligió ${sesion.pareja.nombre}.`),
       d.yo?.recuperado && '🎟️ Lo recuperaste con un comodín.',
       visible && d.pareja.recuperado && `🎟️ ${sesion.pareja.nombre} lo recuperó con un comodín.`,
+      posp.yo && `⏸ Lo pospusiste porque ${MOTIVO_TEXTO[posp.yo.motivo] === 'estaba ocupado' ? 'estabas ocupado' : 'te sentías mal'} (${posp.yo.nivel}/10): «${posp.yo.texto}».`,
+      posp.pareja && `⏸ ${sesion.pareja.nombre} lo pospuso porque ${MOTIVO_TEXTO[posp.pareja.motivo] || 'no pudo'} (${posp.pareja.nivel}/10): «${posp.pareja.texto}».`,
+      d.pareja && !visible && posp.pendiente && `Verás el de ${sesion.pareja.nombre} cuando hagas el tuyo.`,
     ].filter(Boolean);
     hoja({
       titulo: fechaLarga(d.fecha),
@@ -999,7 +644,8 @@ async function pantallaCalendario(cont, vigente) {
       contenido: h('div', null,
         h('p', { class: 'hoja-tema' }, d.tema ? `Ese día tocó dibujar ${d.tema}.` : ''),
         h('div', { class: 'polaroids chicos' }, mio, suyo),
-        recuperados.length > 0 && h('p', { class: 'hoja-recuperado' }, recuperados.join(' ')),
+        notas.length > 0 && h('div', { class: 'hoja-recuperado' }, notas.map((n) => h('p', null, n))),
+        pendiente && h('p', { class: 'hoja-recuperado' }, `Todavía lo puedes dibujar (sin comodín) hasta el ${fechaCorta(pendiente.hasta)} ⏰`),
         perdido && h('p', { class: 'hoja-recuperado' }, puedoRecuperar
           ? (perdido.gratis ? 'Todavía lo puedes dibujar gratis 🏃' : `Puedes dibujarlo con un comodín 🎟️ (${teQuedan(hoyDatos.comodines.quedan).toLowerCase()}).`)
           : 'Se te pasó, y no te quedan comodines 😿'),
@@ -1009,9 +655,11 @@ async function pantallaCalendario(cont, vigente) {
           fecha: d.fecha, tema: d.tema, miV: d.yo?.v, parejaV: visible ? d.pareja.v : null,
           notaMia, notaSuya: visible ? d.pareja.nota : null, fuente: fuenteLocal,
         }))),
-      acciones: puedoRecuperar
-        ? [{ texto: 'Cerrar', clase: 'blanco' }, { texto: '🎟️ Dibujarlo', clase: 'fresa', onClick: () => navegar(`dibujar/${d.fecha}`) }]
-        : [{ texto: 'Cerrar', clase: 'sol' }],
+      acciones: pendiente
+        ? [{ texto: 'Cerrar', clase: 'blanco' }, { texto: '⏰ Dibujarlo', clase: 'fresa', onClick: () => navegar(`dibujar/${d.fecha}`) }]
+        : puedoRecuperar
+          ? [{ texto: 'Cerrar', clase: 'blanco' }, { texto: '🎟️ Dibujarlo', clase: 'fresa', onClick: () => navegar(`dibujar/${d.fecha}`) }]
+          : [{ texto: 'Cerrar', clase: 'sol' }],
     });
   }
 
@@ -1026,21 +674,23 @@ async function pantallaCalendario(cont, vigente) {
       if (d.yo) miniaturas.push(h('img', { class: 'mini mia', src: d.yo.mini, alt: '', draggable: 'false' }));
       if (d.pareja?.visible) miniaturas.push(h('img', { class: 'mini suya', src: d.pareja.mini, alt: '', draggable: 'false' }));
       else if (d.pareja) miniaturas.push(h('span', { class: 'mini suya sorpresa' }, icono('sobre')));
+      const posp = d.pospuesto || {};
+      const marquita = (posp.yo && !d.yo) || (posp.pareja && !d.pareja) ? h('span', { class: 'dia-pospuesto', 'aria-hidden': 'true' }, '⏸') : null;
 
-      const etiqueta = `${fechaLarga(d.fecha)}${d.yo ? ', tu dibujo está terminado' : ''}${d.pareja ? `, ${sesion.pareja.nombre} terminó el suyo` : ''}`;
+      const etiqueta = `${fechaLarga(d.fecha)}${d.yo ? ', tu dibujo está terminado' : ''}${d.pareja ? `, ${sesion.pareja.nombre} terminó el suyo` : ''}${posp.yo || posp.pareja ? ', con un dibujo pospuesto' : ''}`;
       celdas.push(h('li', null, h('button', {
         type: 'button',
         class: `dia ${esHoy ? 'hoy' : ''} ${d.futuro ? 'futuro' : ''} ${d.yo || d.pareja ? 'con-dibujos' : ''}`,
         disabled: d.futuro,
         'aria-label': etiqueta,
         onclick: () => (esHoy ? navegar('hoy') : abrirDia(d)),
-      }, h('span', { class: 'dia-numero' }, Number(d.fecha.slice(8))), miniaturas.length ? h('span', { class: 'minis' }, miniaturas) : null)));
+      }, h('span', { class: 'dia-numero' }, Number(d.fecha.slice(8))), marquita, miniaturas.length ? h('span', { class: 'minis' }, miniaturas) : null)));
     }
 
     cuerpo.replaceChildren(
       h('ol', { class: 'semana', 'aria-hidden': 'true' }, DIAS_CORTOS.map((n) => h('li', null, n))),
       h('ol', { class: 'mes' }, celdas),
-      h('p', { class: 'calendario-pie' }, 'Toca un día para ver sus dibujos.'));
+      h('p', { class: 'calendario-pie' }, 'Toca un día para ver sus dibujos. ⏸ = alguien lo pospuso.'));
   }
 
   async function mostrar() {
@@ -1055,7 +705,7 @@ async function pantallaCalendario(cont, vigente) {
       respuesta = await api.mes(clave);
     } catch (e) {
       if (mia !== carga || !vigente()) return;
-      if (e.estado === 401) { sesion = null; navegar('entrar'); return; }
+      if (e.estado === 401) { ponerSesion(null); navegar('entrar'); return; }
       cuerpo.replaceChildren(
         h('p', { class: 'vacio' }, 'No se pudo cargar el mes. Revisa la conexión.'),
         h('button', { type: 'button', class: 'boton sol', onclick: mostrar }, 'Reintentar'));
@@ -1115,9 +765,10 @@ const AVISO_ACTUALIZADA = 'garabatos-actualizada';
 let versionCargada = null;
 let hayVersionNueva = false;
 let ultimaRevision = 0;
+const dibujandoAhora = () => /^#\/(dibujar|reto\/dibujar|casa\/personaje)/.test(location.hash);
 
 function recargarSiToca() {
-  if (!hayVersionNueva || location.hash.startsWith('#/dibujar')) return false;
+  if (!hayVersionNueva || dibujandoAhora()) return false;
   try { sessionStorage.setItem(AVISO_ACTUALIZADA, '1'); } catch { /* sin almacenamiento */ }
   location.reload();
   return true;
@@ -1142,6 +793,33 @@ try {
 } catch { /* sin almacenamiento */ }
 
 // ================================================================== router
+// #/hoy · #/dibujar[/fecha] · #/calendario · #/reto[/dibujar] · #/casa[/personaje] · #/nosotros
+const PANTALLAS = {
+  hoy: pantallaHoy,
+  calendario: pantallaCalendario,
+  nosotros: pantallaNosotros,
+  async dibujar(cont, vigente, fecha) {
+    const modo = await modoDiario(fecha);
+    if (!modo || !vigente()) return undefined;
+    return pantallaLienzo(cont, vigente, modo);
+  },
+  async reto(cont, vigente, sub) {
+    if (sub !== 'dibujar') return pantallaReto(cont, vigente);
+    const modo = await modoReto();
+    if (!modo || !vigente()) return undefined;
+    return pantallaLienzo(cont, vigente, modo);
+  },
+  // La casa (con Three.js) se baja solo cuando se entra a ella.
+  async casa(cont, vigente, sub) {
+    const casa = await import('./casa/casa.js');
+    if (!vigente()) return undefined;
+    if (sub !== 'personaje') return casa.pantallaCasa(cont, vigente);
+    const modo = await casa.modoPersonaje();
+    if (!modo || !vigente()) return undefined;
+    return pantallaLienzo(cont, vigente, modo);
+  },
+};
+
 async function ir() {
   if (recargarSiToca()) return;
   revisarVersion();
@@ -1154,38 +832,46 @@ async function ir() {
 
   raiz.replaceChildren();
   document.body.classList.remove('modo-dibujo');
-  // #/dibujar/2026-10-19 = recuperar ese día con un comodín
   const [ruta, parametro] = (location.hash.replace(/^#\//, '') || 'hoy').split('/');
 
   try {
     if (!sesion) {
-      try { sesion = await pedirSesion(); } catch (e) { if (e.estado !== 401) throw e; }
+      try { ponerSesion(await pedirSesion()); } catch (e) { if (e.estado !== 401) throw e; }
     }
     if (!vigente()) return;
 
     if (!sesion) {
       if (ruta !== 'entrar') { location.replace('#/entrar'); return; }
+      ponerRacha(0);
       soltar = pantallaEntrar(raiz);
       return;
     }
     if (ruta === 'entrar') { location.replace('#/hoy'); return; }
     sincronizarAvisos(sesion.yo);
+    // La cartita de novedades (una sola vez), cuando no se está dibujando.
+    if (sesion.novedades && !dibujandoAhora()) {
+      const { de } = sesion.novedades;
+      sesion.novedades = null;
+      setTimeout(() => mostrarNovedades(sesion, { de }), 900);
+    }
 
-    const pantallas = { hoy: pantallaHoy, dibujar: pantallaDibujar, calendario: pantallaCalendario };
-    const construir = pantallas[ruta];
+    const construir = PANTALLAS[ruta];
     if (!construir) { location.replace('#/hoy'); return; }
     const limpieza = await construir(raiz, vigente, parametro);
     if (!vigente()) { if (limpieza) limpieza(); return; }
     soltar = limpieza || null;
   } catch (e) {
     if (!vigente()) return;
-    if (e.estado === 401) { sesion = null; location.replace('#/entrar'); return; }
+    if (e.estado === 401) { ponerSesion(null); location.replace('#/entrar'); return; }
+    console.error(e);
     raiz.replaceChildren(h('main', { class: 'pantalla' },
       h('p', { class: 'vacio' }, 'No se pudo conectar con el servidor. Revisa tu conexión.'),
       h('button', { type: 'button', class: 'boton sol', onclick: ir }, 'Reintentar')));
   }
 }
 
+alNavegar(ir);
+rachaInicial();
 window.addEventListener('hashchange', ir);
 // Evita el zoom por pellizco de iOS fuera del lienzo.
 document.addEventListener('gesturestart', (e) => e.preventDefault());

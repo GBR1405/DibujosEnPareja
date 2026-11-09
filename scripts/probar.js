@@ -486,6 +486,269 @@ function servidorAparte(env) {
     const msBalde = Date.now() - inicioBalde;
     assert.ok(msBalde < 1500, `tardó ${msBalde} ms`); paso(`en el lienzo de tamaño real tarda ${msBalde} ms`);
 
+    console.log('Racha y posponer (reglas)');
+    const { calcularRacha, nivelDeRacha } = require('../lib/racha');
+    const H = '2026-06-10';
+    const d = (n) => F.sumarDias(H, -n);
+    const conjunto = (pares) => new Map(pares.map(([f, ...q]) => [f, new Set(q)]));
+    const quienes = ['uno', 'dos'];
+    assert.equal(calcularRacha({ completos: [d(1), d(2), d(3), d(4), d(5)], quienes, hoy: H }), 5); paso('sin posponer: cuenta los días seguidos de los dos (hoy no rompe)');
+    assert.equal(calcularRacha({
+      completos: [d(2), d(3), d(4)], recientes: conjunto([[d(1), 'dos']]), pospuestos: conjunto([[d(1), 'uno']]), quienes, hoy: H,
+    }), 3); paso('ayer pospuesto (y todavía a tiempo): la racha se congela, no se rompe ni suma');
+    assert.equal(calcularRacha({
+      completos: [d(1), d(2), d(3), d(4)], pospuestos: conjunto([[d(1), 'uno']]), quienes, hoy: H,
+    }), 4); paso('al hacer el pospuesto, ese día vuelve a sumar');
+    const vencida = { completos: [d(1), d(3), d(4)], recientes: conjunto([[d(2), 'dos']]), pospuestos: conjunto([[d(2), 'uno']]), quienes, hoy: H };
+    assert.equal(calcularRacha(vencida), 1);
+    assert.equal(calcularRacha({ ...vencida, enGracia: true }), 3); paso('si el pospuesto no se hizo a tiempo, la racha se rompe (a la madrugada todavía hay gracia)');
+    assert.equal(calcularRacha({ completos: [d(2), d(3)], recientes: conjunto([[d(1), 'dos']]), quienes, hoy: H }), 0); paso('un día que no se pospuso y no se hizo rompe la racha como siempre');
+    assert.deepEqual([0, 3, 4, 7, 8, 15, 16, 30, 31, 59, 60, 200].map(nivelDeRacha), [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]); paso('el fondo cambia: 0-3 nada, 4-7, 8-15, 16-30, 31-59 y 60 o más');
+
+    console.log('Retos (reglas)');
+    const RETOS = require('../lib/retos');
+    const JUEGO = require('../lib/reto-juego');
+    const nombres = { uno: 'Gabri', dos: 'Eli' };
+    const tiposVistos = new Set();
+    for (let s = 0; s < 12; s += 1) tiposVistos.add(RETOS.retoDeLaSemana(F.sumarDias('2026-11-02', 7 * s), quienes).tipo);
+    assert.equal(tiposVistos.size, 6); paso('en 12 semanas salen los 6 tipos de reto');
+    const s1 = RETOS.retoDeLaSemana('2026-11-11', quienes);
+    const s2 = RETOS.retoDeLaSemana('2026-11-15', quienes);
+    assert.deepEqual([s1.semana, s1.hasta, s1.tipo, s1.primero], [s2.semana, "2026-11-15", s2.tipo, s2.primero]);
+    assert.notEqual(RETOS.retoDeLaSemana('2026-11-16', quienes).primero, s1.primero); paso('el reto dura de lunes a domingo y quien empieza se turna cada semana');
+    assert.ok(RETOS.adivino('Un globo', 'globo') && RETOS.adivino('volcan', 'volcán') && RETOS.adivino('las tortugas', 'tortuga') && RETOS.adivino('muñecos de nieve', 'muñeco de nieve'));
+    assert.ok(!RETOS.adivino('perro', 'gato') && !RETOS.adivino('', 'gato')); paso('al adivinar no importan tildes, artículos ni plurales');
+    const juega = (tipo) => ({ ...RETOS.retoDeLaSemana('2026-11-11', quienes), tipo, ...RETOS.TIPOS[tipo], primero: 'uno', segundo: 'dos' });
+    const conImg = (datos, clave) => ({ ...datos, imgs: { ...(datos.imgs || {}), [clave]: 'v' } });
+    const ver = (reto, datos, yo) => JUEGO.vista(reto, { datos }, yo, nombres, { hoy: '2026-11-11' });
+    // mitad
+    let reto = juega('mitad');
+    assert.deepEqual([ver(reto, {}, 'uno').accion.zona, ver(reto, {}, 'dos').fase], ['izq', 'esperando']);
+    let datos = conImg({}, 'base');
+    assert.deepEqual([ver(reto, datos, 'dos').accion.zona, ver(reto, datos, 'dos').accion.fondo, ver(reto, datos, 'uno').fase], ['der', 'base', 'esperando']);
+    assert.equal(ver(reto, conImg(datos, 'final'), 'uno').fase, 'listo'); paso('mitad y mitad: izquierda primero, después la derecha sobre la otra mitad');
+    // garabato
+    reto = juega('garabato');
+    assert.equal(ver(reto, {}, 'uno').accion.maxTrazos, 3);
+    assert.ok(ver(reto, conImg({}, 'base'), 'dos').accion.pideTitulo); paso('termina mi garabato: 3 trazos, y el otro le pone nombre');
+    // adivina
+    reto = juega('adivina');
+    const opciones = ver(reto, {}, 'uno').extra.opciones;
+    assert.equal(opciones.length, 3);
+    assert.throws(() => JUEGO.aplicar(reto, {}, 'uno', 'palabra', { palabra: 'no-esta' }), /palabra_invalida/);
+    datos = conImg(JUEGO.aplicar(reto, {}, 'uno', 'palabra', { palabra: opciones[0] }), 'dibujo');
+    assert.equal(ver(reto, datos, 'dos').extra.palabra, undefined); paso('adivina: la palabra secreta no le llega al que adivina');
+    assert.throws(() => JUEGO.aplicar(reto, datos, 'uno', 'adivinar', { intento: 'x' }), /no_te_toca/);
+    let d2 = JUEGO.aplicar(reto, datos, 'dos', 'adivinar', { intento: 'nada que ver' });
+    d2 = JUEGO.aplicar(reto, d2, 'dos', 'adivinar', { intento: 'tampoco' });
+    assert.equal(ver(reto, d2, 'dos').extra.quedan, 1);
+    const fallado = JUEGO.aplicar(reto, d2, 'dos', 'adivinar', { intento: 'ni idea' });
+    assert.deepEqual([fallado.acertado, ver(reto, fallado, 'dos').extra.palabra, ver(reto, fallado, 'dos').fase], [false, opciones[0], 'listo']);
+    assert.equal(JUEGO.aplicar(reto, datos, 'dos', 'adivinar', { intento: opciones[0].toUpperCase() }).acertado, true); paso('adivina: 3 intentos; al acertar o fallar, se revela');
+    // colores
+    reto = juega('colores');
+    assert.equal(ver(reto, {}, 'dos').accion.tipo, 'elegir_colores');
+    assert.throws(() => JUEGO.aplicar(reto, {}, 'dos', 'colores', { colores: ['#ff0000', '#ff0000', '#00ff00'] }), /colores_invalidos/);
+    datos = JUEGO.aplicar(reto, {}, 'dos', 'colores', { colores: ['#ff0000', '#00ff00', '#0000ff'] });
+    assert.deepEqual([ver(reto, datos, 'uno').accion.tipo, ver(reto, datos, 'dos').fase], ['elegir_colores', 'esperando']);
+    datos = JUEGO.aplicar(reto, datos, 'uno', 'colores', { colores: ['#ffe500', '#8a00ff', '#00cfff'] });
+    assert.deepEqual(ver(reto, datos, 'uno').accion.paleta, ['#ff0000', '#00ff00', '#0000ff']);
+    assert.deepEqual(ver(reto, datos, 'dos').accion.paleta, ['#ffe500', '#8a00ff', '#00cfff']);
+    datos = conImg(datos, 'uno');
+    assert.deepEqual([JUEGO.puedeVer(reto, datos, 'dos', 'uno'), JUEGO.puedeVer(reto, conImg(datos, 'dos'), 'dos', 'uno')], [false, true]); paso('tus colores, mi dibujo: cada quien dibuja con los 3 colores que le eligieron');
+    // memoria
+    reto = juega('memoria');
+    datos = conImg({}, 'dibujo');
+    assert.equal(ver(reto, datos, 'dos').accion.tipo, 'mirar');
+    assert.equal(JUEGO.puedeVer(reto, datos, 'dos', 'dibujo'), false);
+    const mirando = JUEGO.aplicar(reto, datos, 'dos', 'mirar', {});
+    assert.deepEqual([JUEGO.puedeVer(reto, mirando, 'dos', 'dibujo'), JUEGO.puedeVer(reto, mirando, 'dos', 'dibujo', Date.now() + 60_000)], [true, false]);
+    assert.throws(() => JUEGO.aplicar(reto, mirando, 'dos', 'mirar', {}), /ya_hecho/);
+    assert.equal(ver(reto, mirando, 'dos').accion.clave, 'copia'); paso('de memoria: se mira una sola vez, unos segundos, y luego se dibuja');
+    // tema
+    reto = juega('tema');
+    datos = JUEGO.aplicar(reto, {}, 'uno', 'tema', { tema: '  un dragón   con lentes ' }, { hoy: '2026-11-11', manana: '2026-11-12' });
+    assert.deepEqual([datos.tema, datos.fecha, ver(reto, datos, 'dos').extra.tema], ['un dragón con lentes', '2026-11-12', null]);
+    assert.equal(JUEGO.vista(reto, { datos }, 'dos', nombres, { hoy: '2026-11-12' }).extra.tema, 'un dragón con lentes'); paso('tú eliges el tema: es sorpresa hasta el día siguiente');
+
+    console.log('Casa (reglas)');
+    const CASA = require('../lib/casa');
+    const puestos = [{ id: 1, tipo: 'cama', x: 0, z: 0, rot: 0 }, { id: 2, tipo: 'cuadro', x: 2, pared: 'izq' }];
+    assert.equal(CASA.revisarLugar({ id: 3, tipo: 'sofa', x: 1, z: 2, rot: 0 }, puestos), 'lugar_ocupado');
+    assert.equal(CASA.revisarLugar({ id: 3, tipo: 'sofa', x: 6, z: 5, rot: 0 }, puestos), 'lugar_invalido');
+    assert.equal(CASA.revisarLugar({ id: 3, tipo: 'sofa', x: 7, z: 4, rot: 1 }, puestos), null);
+    assert.equal(CASA.revisarLugar({ id: 3, tipo: 'alfombra', x: 0, z: 0, rot: 0 }, puestos), null);
+    assert.equal(CASA.revisarLugar({ id: 1, tipo: 'cama', x: 1, z: 1, rot: 0 }, puestos), null); paso('los muebles no se enciman (salvo las alfombras) ni se salen del cuarto; al girar cambian de forma');
+    assert.equal(CASA.revisarLugar({ id: 4, tipo: 'ventana', x: 1, pared: 'izq' }, puestos), 'lugar_ocupado');
+    assert.equal(CASA.revisarLugar({ id: 4, tipo: 'ventana', x: 1, pared: 'der' }, puestos), null); paso('en las paredes tampoco se enciman');
+
+    console.log('Posponer');
+    if (F.anioDe(hace(8)) !== F.anioDe(hoy)) {
+      console.log('  (se salta: la semana cruza el año nuevo)');
+    } else {
+      config.horasDeGracia = 0;
+      const estado = async (cookie) => (await pedir('GET', '/api/hoy', { cookie })).datos;
+      await base.borrarDibujo({ fecha: hoy, quien: 'uno' });
+      const posponer = (cookie, cuerpo) => pedir('POST', '/api/posponer', { cookie, cuerpo });
+      assert.equal((await posponer(A.cookie, { motivo: 'aburrido', nivel: 5, texto: 'x' })).estado, 400);
+      assert.equal((await posponer(A.cookie, { motivo: 'mal', nivel: 11, texto: 'x' })).estado, 400);
+      assert.equal((await posponer(A.cookie, { motivo: 'mal', nivel: 7, texto: '   ' })).estado, 400); paso('para posponer hay que decir por qué (motivo, de 1 a 10 y un textito)');
+      intentos.length = 0;
+      assert.equal((await posponer(A.cookie, { motivo: 'mal', nivel: 7, texto: 'Me duele la cabeza' })).estado, 200);
+      assert.equal(intentos[0].titulo, `${gabri} pospuso el dibujo de hoy 🤒`); paso(`a la pareja le llega: "${intentos[0].titulo}"`);
+      assert.equal((await posponer(A.cookie, { motivo: 'mal', nivel: 7, texto: 'otra vez' })).datos.error, 'ya_pospusiste');
+      const eA = await estado(A.cookie);
+      const eB = await estado(B.cookie);
+      assert.deepEqual([eA.posponer.puedo, eA.posponer.porque, eA.posponer.mio.nivel], [false, 'ya_pospusiste', 7]);
+      assert.deepEqual(eB.posponer.suyo, { motivo: 'mal', nivel: 7, texto: 'Me duele la cabeza' }); paso('los dos ven que se pospuso, con el motivo y su carita del 1 al 10');
+      assert.equal((await pedir('POST', '/api/animos', { cookie: B.cookie })).estado, 200);
+      assert.equal((await pedir('POST', '/api/animos', { cookie: B.cookie })).estado, 409);
+      assert.equal((await pedir('POST', '/api/animos', { cookie: A.cookie })).estado, 400); paso('la pareja le puede mandar ánimos (una vez al día)');
+      assert.equal((await posponer(B.cookie, { motivo: 'ocupado', nivel: 3, texto: 'Trabajo' })).datos.error, 'ya_dibujaste'); paso('no se pospone si ya dibujaste');
+
+      // B pospuso AYER (y A sí dibujó ayer): hoy B tiene que hacer los dos.
+      await base.borrarDibujo({ fecha: hoy, quien: 'dos' });
+      await base.borrarDibujo({ fecha: ayer, quien: 'dos' });
+      await base.insertarPospuesto({ fecha: ayer, quien: 'dos', motivo: 'ocupado', nivel: 4 });
+      assert.equal((await posponer(B.cookie, { motivo: 'ocupado', nivel: 3, texto: 'Otra vez' })).datos.error, 'ayer_pospusiste'); paso('no se puede posponer dos días seguidos');
+      let e2 = await estado(B.cookie);
+      assert.deepEqual(e2.posponer.pendientes.map((p) => p.fecha), [ayer]);
+      assert.ok(!e2.perdidos.some((p) => p.fecha === ayer));
+      assert.deepEqual((await estado(A.cookie)).posponer.suyosPendientes.map((p) => p.fecha), [ayer]); paso('al día siguiente, el pospuesto aparece como pendiente (no como "perdido")');
+      assert.equal((await pedir('GET', `/api/dibujo/${ayer}/uno`, { cookie: B.cookie })).estado, 403); paso('mientras no lo haga, no ve el dibujo de su pareja de ese día');
+      const comodinesAntes = e2.comodines.quedan;
+      intentos.length = 0;
+      const hecho = await pedir('POST', '/api/terminar', { cookie: B.cookie, cuerpo: { fecha: ayer, imagen: png } });
+      assert.equal(hecho.estado, 200);
+      e2 = await estado(B.cookie);
+      assert.deepEqual([e2.comodines.quedan, e2.posponer.pendientes.length], [comodinesAntes, 0]);
+      assert.ok(intentos.some((i) => i.titulo === `${eli} hizo el dibujo que había pospuesto 💪`)); paso('el pospuesto se hace gratis (sin comodín) y se le avisa a la pareja');
+      assert.equal((await pedir('GET', `/api/dibujo/${ayer}/uno`, { cookie: B.cookie })).estado, 200); paso('ya hecho, se ve el de la pareja');
+      // Un día pospuesto que se pasó: ya no se recupera, ni con comodín.
+      await base.insertarPospuesto({ fecha: hace(5), quien: 'dos' });
+      e2 = await estado(B.cookie);
+      assert.ok(!e2.perdidos.some((p) => p.fecha === hace(5)));
+      const vencido = await pedir('POST', '/api/terminar', { cookie: B.cookie, cuerpo: { fecha: hace(5), imagen: png, comodin: true } });
+      assert.deepEqual([vencido.estado, vencido.datos.error], [400, 'pospuesto_vencido']); paso('si se pasó el plazo, el día pospuesto no se recupera ni con comodín');
+      const diaMes = (await pedir('GET', `/api/mes/${ayer.slice(0, 7)}`, { cookie: A.cookie })).datos.dias.find((x) => x.fecha === ayer);
+      assert.equal(diaMes.pospuesto.pareja.motivo, 'ocupado'); paso('el calendario muestra los días pospuestos');
+      config.horasDeGracia = 24;
+    }
+
+    console.log('Monedas y casa');
+    let casa = (await pedir('GET', '/api/casa', { cookie: A.cookie })).datos;
+    const totalDibujos = await base.contar();
+    assert.ok(casa.monedas >= totalDibujos * CASA.GANANCIAS.dibujo, `${casa.monedas} monedas para ${totalDibujos} dibujos`);
+    assert.equal((await pedir('GET', '/api/casa', { cookie: B.cookie })).datos.monedas, casa.monedas); paso(`cada dibujo da monedas a la alcancía de los dos (hay ${casa.monedas} 🪙) y no se cuentan dos veces`);
+    await base.sumarMonedas([{ clave: 'prueba:tope', quien: null, cantidad: 400 - casa.monedas, motivo: 'prueba' }]);
+    const comprar = (cookie, tipo) => pedir('POST', '/api/casa/comprar', { cookie, cuerpo: { tipo } });
+    const cama = await comprar(A.cookie, 'cama');
+    assert.deepEqual([cama.estado, cama.datos.monedas], [200, 260]);
+    const sofa = await comprar(B.cookie, 'sofa');
+    const cuadro = await comprar(B.cookie, 'cuadro');
+    assert.equal(cuadro.datos.monedas, 400 - 140 - 110 - 30);
+    const caro = await comprar(A.cookie, 'piano');
+    assert.deepEqual([caro.estado, caro.datos.error], [402, 'sin_monedas']); paso('se compran muebles con la plata de los dos; si no alcanza, no');
+    const poner = (cuerpo) => pedir('POST', '/api/casa/poner', { cookie: A.cookie, cuerpo });
+    assert.equal((await poner({ id: cama.datos.id, x: 0, z: 0, rot: 0 })).estado, 200);
+    assert.equal((await poner({ id: sofa.datos.id, x: 1, z: 2, rot: 0 })).estado, 409);
+    assert.equal((await poner({ id: sofa.datos.id, x: 7, z: 0, rot: 0 })).estado, 400);
+    assert.equal((await poner({ id: sofa.datos.id, x: 4, z: 7, rot: 0 })).estado, 200);
+    assert.equal((await poner({ id: cuadro.datos.id, x: 3, pared: 'der' })).estado, 200); paso('se acomodan en el cuarto (piso y paredes) sin encimarse');
+    assert.equal((await pedir('POST', '/api/casa/cuadro', { cookie: A.cookie, cuerpo: { id: cuadro.datos.id, fecha: ayer, quien: 'dos' } })).estado, 200);
+    assert.equal((await pedir('POST', '/api/casa/cuadro', { cookie: A.cookie, cuerpo: { id: cama.datos.id, fecha: ayer, quien: 'dos' } })).estado, 404); paso('en el cuadro se puede poner uno de sus dibujos');
+    await pedir('POST', '/api/casa/guardar', { cookie: A.cookie, cuerpo: { id: sofa.datos.id } });
+    const vendido = await pedir('POST', '/api/casa/vender', { cookie: A.cookie, cuerpo: { id: sofa.datos.id } });
+    assert.equal(vendido.datos.monedas, 120 + 55);
+    casa = (await pedir('GET', '/api/casa', { cookie: B.cookie })).datos;
+    assert.deepEqual(casa.muebles.map((m) => [m.tipo, m.x, m.dibujo]), [['cama', 0, null], ['cuadro', 3, `${ayer}/dos`]]); paso('guardar y vender (se devuelve la mitad)');
+    assert.equal((await comprar(A.cookie, 'pintura_rosa')).estado, 200);
+    assert.equal((await comprar(A.cookie, 'pintura_rosa')).estado, 409);
+    casa = (await pedir('GET', '/api/casa', { cookie: B.cookie })).datos;
+    assert.deepEqual([casa.ajustes.pintura, casa.tiene.includes('pintura_crema'), casa.tiene.includes('pintura_rosa')], ['pintura_rosa', true, true]);
+    assert.equal((await pedir('POST', '/api/casa/cuarto', { cookie: B.cookie, cuerpo: { tipo: 'pintura_crema' } })).estado, 200);
+    assert.equal((await pedir('POST', '/api/casa/cuarto', { cookie: B.cookie, cuerpo: { tipo: 'piso_lila' } })).estado, 402); paso('la pintura y el piso se compran una vez y se cambian cuando quieran');
+    assert.ok(casa.movimientos.some((m) => m.motivo === 'compra:cama' && m.cantidad === -140)); paso('la alcancía guarda en qué se gastó');
+
+    console.log('Personajes');
+    const personaje = async (w, h, formato = 'png') => `data:image/${formato};base64,${(await sharp({ create: { width: w, height: h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><circle cx="${w / 2}" cy="${h / 3}" r="${w / 4}" fill="#ff6f91"/></svg>`) }])[formato]().toBuffer()).toString('base64')}`;
+    assert.equal((await pedir('POST', '/api/avatar', { cookie: A.cookie, cuerpo: { imagen: await personaje(600, 600) } })).estado, 400);
+    assert.equal((await pedir('POST', '/api/avatar', { cookie: A.cookie, cuerpo: { imagen: await personaje(600, 800, 'jpeg') } })).estado, 400);
+    const subido = await pedir('POST', '/api/avatar', { cookie: A.cookie, cuerpo: { imagen: await personaje(600, 800) } });
+    assert.equal(subido.estado, 200);
+    const avatar = await pedir('GET', '/api/avatar/uno', { cookie: B.cookie });
+    const metaAvatar = await sharp(avatar.datos).metadata();
+    assert.deepEqual([metaAvatar.format, metaAvatar.width, metaAvatar.height, metaAvatar.hasAlpha], ['webp', 480, 640, true]);
+    assert.equal((await pedir('GET', '/api/casa', { cookie: B.cookie })).datos.avatares.uno, subido.datos.v); paso('cada quien sube su personaje (con fondo transparente) y la casa sabe cuál es');
+
+    console.log('Reto de la semana');
+    const rA = (await pedir('GET', '/api/reto', { cookie: A.cookie })).datos.reto;
+    const rB = (await pedir('GET', '/api/reto', { cookie: B.cookie })).datos.reto;
+    assert.deepEqual([rA.semana, rA.tipo, rA.soyPrimero, rB.soyPrimero], [RETOS.lunesDe(hoy), RETOS.retoDeLaSemana(hoy, quienes).tipo, rA.primero === 'uno', rB.primero === 'dos']); paso(`esta semana: ${rA.emoji} ${rA.nombre}`);
+    const yoEmpiezo = rA.soyPrimero ? { cookie: A.cookie, r: rA } : { cookie: B.cookie, r: rB };
+    const otroSigue = rA.soyPrimero ? B.cookie : A.cookie;
+    const acc = yoEmpiezo.r.accion || {};
+    intentos.length = 0;
+    let paso1;
+    if (acc.tipo === 'dibujar') paso1 = await pedir('POST', '/api/reto/dibujo', { cookie: yoEmpiezo.cookie, cuerpo: { imagen: png } });
+    else if (acc.tipo === 'elegir_tema') paso1 = await pedir('POST', '/api/reto/tema', { cookie: yoEmpiezo.cookie, cuerpo: { tema: 'un pingüino astronauta' } });
+    else if (acc.tipo === 'elegir_palabra') paso1 = await pedir('POST', '/api/reto/palabra', { cookie: yoEmpiezo.cookie, cuerpo: { palabra: yoEmpiezo.r.extra.opciones[0] } });
+    else if (acc.tipo === 'elegir_colores') paso1 = await pedir('POST', '/api/reto/colores', { cookie: yoEmpiezo.cookie, cuerpo: { colores: ['#ff1a3c', '#00b14f', '#0050ff'] } });
+    assert.equal(paso1 && paso1.estado, 200, JSON.stringify(acc));
+    assert.equal((await pedir('POST', '/api/reto/dibujo', { cookie: otroSigue, cuerpo: { imagen: png } })).estado, rA.tipo === 'colores' ? 200 : 409); paso('quien empieza hace su parte; el otro no puede adelantarse');
+    if (rA.tipo === 'tema') {
+      const manana = F.sumarDias(hoy, 1);
+      assert.deepEqual((await base.temasElegidosEntre(manana, manana)).map((t) => t.tema), ['un pingüino astronauta']); paso('el tema elegido queda para mañana');
+    } else if (rA.tipo !== 'colores') {
+      assert.ok(intentos.some((i) => i.titulo.startsWith('¡Te toca en el reto!'))); paso('a la pareja le avisa que le toca');
+    }
+    if (rA.tipo === 'mitad' || rA.tipo === 'garabato') {
+      const fin = await pedir('POST', '/api/reto/dibujo', { cookie: otroSigue, cuerpo: { imagen: png, titulo: 'Un dragón' } });
+      assert.deepEqual([fin.estado, fin.datos.reto.fase], [200, 'listo']);
+      assert.equal((await pedir('GET', `/api/reto/imagen/${rA.semana}/final`, { cookie: yoEmpiezo.cookie })).estado, 200); paso('al completarlo, los dos ven el dibujo final y ganan monedas');
+    }
+
+    console.log('Pregunta del día');
+    const { preguntaDelDia } = require('../lib/preguntas');
+    let pA = (await pedir('GET', '/api/pregunta', { cookie: A.cookie })).datos;
+    assert.equal(pA.hoy.pregunta, preguntaDelDia(hoy));
+    assert.equal((await pedir('POST', '/api/pregunta', { cookie: A.cookie, cuerpo: { texto: '   ' } })).estado, 400);
+    assert.equal((await pedir('POST', '/api/pregunta', { cookie: A.cookie, cuerpo: { texto: 'A la playa 🏖️' } })).datos.monedas, CASA.GANANCIAS.pregunta);
+    assert.equal((await pedir('POST', '/api/pregunta', { cookie: A.cookie, cuerpo: { texto: 'otra' } })).estado, 409);
+    let pB = (await pedir('GET', '/api/pregunta', { cookie: B.cookie })).datos;
+    assert.deepEqual([pB.hoy.suya, pB.hoy.parejaRespondio], [null, true]); paso('la respuesta de la pareja se ve solo después de responder la tuya');
+    await pedir('POST', '/api/pregunta', { cookie: B.cookie, cuerpo: { texto: 'A la montaña' } });
+    pB = (await pedir('GET', '/api/pregunta', { cookie: B.cookie })).datos;
+    pA = (await pedir('GET', '/api/pregunta', { cookie: A.cookie })).datos;
+    assert.deepEqual([pB.hoy.suya, pA.hoy.suya], ['A la playa 🏖️', 'A la montaña']); paso('ya respondidas, los dos ven las dos');
+
+    console.log('Cartitas');
+    const escribir = (cuerpo) => pedir('POST', '/api/cartas', { cookie: A.cookie, cuerpo: { color: '#ffc2d1', ...cuerpo } });
+    assert.equal((await escribir({ cuando: 'nunca', texto: 'hola' })).estado, 400);
+    assert.equal((await escribir({ cuando: 'triste', texto: 'hola', color: '#000000' })).estado, 400);
+    assert.equal((await escribir({ cuando: 'fecha', fecha: hoy, texto: 'hola' })).estado, 400);
+    intentos.length = 0;
+    const carta = await escribir({ cuando: 'triste', texto: 'Eres lo más bonito\nque tengo 💛' });
+    assert.equal(carta.estado, 200);
+    assert.ok(intentos.some((i) => i.titulo === `${gabri} te escribió una cartita 💌` && i.texto === '«Ábrela cuando estés triste»'));
+    const futura = await escribir({ cuando: 'fecha', fecha: F.sumarDias(hoy, 30), texto: 'Feliz mes 🎉' });
+    let cB = (await pedir('GET', '/api/cartas', { cookie: B.cookie })).datos;
+    assert.deepEqual(cB.recibidas.map((c) => [c.cuando, c.texto]), [['fecha', null], ['triste', null]]); paso('la cartita llega cerradita: no se lee hasta abrirla');
+    assert.equal((await pedir('POST', `/api/cartas/${futura.datos.id}/abrir`, { cookie: B.cookie })).estado, 403);
+    assert.equal((await pedir('POST', `/api/cartas/${carta.datos.id}/abrir`, { cookie: A.cookie })).estado, 404);
+    intentos.length = 0;
+    const abierta = await pedir('POST', `/api/cartas/${carta.datos.id}/abrir`, { cookie: B.cookie });
+    assert.equal(abierta.datos.carta.texto, 'Eres lo más bonito\nque tengo 💛');
+    assert.ok(intentos.some((i) => i.titulo === `${eli} abrió tu cartita 🥹`)); paso('se abre cuando la necesites (la de fecha, no antes) y a quien la escribió le avisa');
+
+    console.log('Novedades');
+    assert.equal((await pedir('GET', '/api/yo', { cookie: A.cookie })).datos.novedades, null);
+    assert.deepEqual((await pedir('GET', '/api/yo', { cookie: B.cookie })).datos.novedades, { id: config.novedades.id, de: 'uno' });
+    await pedir('POST', '/api/novedades/visto', { cookie: B.cookie });
+    assert.equal((await pedir('GET', '/api/yo', { cookie: B.cookie })).datos.novedades, null); paso(`la cartita de novedades le sale a ${eli} una sola vez (y a ${gabri} no)`);
+    assert.ok(CASA.CATALOGO.some((m) => m.id === 'perrito_nube') && CASA.CATALOGO.some((m) => m.id === 'rollitos')); paso('en la tienda están el perrito nube y los rollitos de canela ☁️');
+
     console.log('Versión publicada');
     const v1 = await pedir('GET', '/api/version');
     const v2 = await pedir('GET', '/api/version');
@@ -508,6 +771,6 @@ function servidorAparte(env) {
   } finally {
     servidor.close();
     await base.cerrar();
-    fs.rmSync(carpeta, { recursive: true, force: true });
+    try { fs.rmSync(carpeta, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }); } catch { console.warn(`(no se pudo borrar la carpeta temporal ${carpeta})`); }
   }
 })();

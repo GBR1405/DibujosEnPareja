@@ -12,7 +12,17 @@ Además:
 - **Reacciones y notitas.** Al dibujo de tu pareja le puedes poner una reacción (❤️ 🥰 😍 😮 😂 🥺 🌟 👏) y dejarle una notita cortita (hasta 120 letras). La reacción aparece como una pegatina en la esquina de su polaroid y la notita como un globito con tu carita. Se puede cambiar o quitar cuando quieras, en Hoy o desde el calendario. Si tiene los avisos activados, le llega uno.
 - **Postal de los dos.** El botón **Postal de los dos** arma una imagen con los dos dibujos del día, como en la app: el tema en su cartelito, la fecha, las polaroids con nombre y carita, las reacciones, las notitas y "garabatos" abajo. Con **Compartir** se manda por WhatsApp o se guarda en Fotos (en iPhone, desde el menú de compartir: *Guardar imagen*); con **Guardar** se baja como archivo. Se arma en el teléfono, no se guarda en el servidor.
 - **Radio para dibujar.** En la pantalla de dibujar, el botón 🎵 abre una radio con 15 estilos: Lofi, Chill, Jazz, Clásica y piano, Para concentrarse, Lluvia y naturaleza, Bossa nova, Acústica, Baladas románticas, Pop latino, De Costa Rica, K-pop, Anime y J-pop, Videojuegos y Synthwave. Cada estilo tiene varias emisoras en vivo (el botón ⏭ cambia a otra). Solo suena mientras dibujas: al volver a Hoy o al terminar el dibujo, se apaga. Más detalles abajo, en **La radio**.
-- **Garabatito**, el lapicito de la casa. Vive en la pantalla de Hoy: flota, parpadea y en su globito cuenta cómo va el día ("¡Eli ya dibujó! Te está esperando 👀", "¡Eli te dejó una notita!"…). De noche se duerme. Si lo tocas, salta y dice alguna ocurrencia o un truquito de la app.
+- **Garabatito**, el lapicito de la casa. Vive en la pantalla de Hoy: flota, parpadea y en su globito cuenta cómo va el día ("¡Eli ya dibujó! Te está esperando 👀", "¡Eli te dejó una notita!"…). De noche se duerme. Si lo tocas, salta y dice alguna ocurrencia o un truquito de la app. Si lo tocas 7 veces seguidas, pasa volando un perrito nube ☁️.
+- **La racha se ve en el fondo.** 0-3 días: nada; 4-7: el fondo se pone rosadito; 8-15: suben corazones; 16-30: más rosado, más corazones y chispitas; 31-59: burbujas de luz; 60 o más: todo al máximo, con aurora de colores y estrellas fugaces. La **postal** lleva el mismo fondo y una cinta con los días. Tocar la pastilla de la racha explica el nivel y cuánto falta para el siguiente.
+- **Posponer.** "Hoy no puedo… posponer": se elige *Estoy ocupado* o *Me siento mal*, qué tanto (del 1 al 10, con caritas) y por qué. La carita de quien pospuso sale desanimada y la pareja le puede mandar ánimos 💛. Reglas en **Reglas del día**, abajo.
+- **Personajes:** Gabri es un mapache y Eli un gato siamés (`carita` en `config.js`). Tienen carita normal, triste (no dibujó) y desanimada (pospuso).
+- **Herramientas de dibujo nuevas.** La barra se ordenó en tres filas: arriba deshacer, rehacer, el tamaño y ⚙ (opacidad, **estabilizador**, **espejo** y borrar todo); en medio las herramientas (pincel ▾, balde, formas ▾, borrador, **gotero**, **capas**); abajo los colores, con un grupo nuevo **Míos** (tus colores, con selector y los que copias con el gotero). Pinceles: pincel (presión), **tinta** (puntas finitas), **lápiz** (con grano), **marcador** (transparente, se multiplica) y **aerógrafo**. Formas nuevas: flecha y rombo. **2 capas** con ojito, transparencia, juntar y limpiar. El borrador ahora se guarda en IndexedDB, con sus capas.
+- **Reto de la semana** (de lunes a domingo, uno de 6 tipos; quien empieza se turna): *Mitad y mitad* (un lienzo, cada quien su mitad), *Tú eliges el tema* (de mañana, sorpresa), *Termina mi garabato* (3 trazos y el otro lo completa), *Adivina qué es* (3 intentos), *Tus colores, mi dibujo* (3 colores que te regalan) y *De memoria* (verlo 10 segundos y dibujarlo). Completarlo da 40 🪙 (+20 si adivinan).
+- **La casa 🏠** (en 2.5D, con Three.js). Cada dibujo da monedas a la alcancía de los dos (10 por dibujo, +5 si dibujan los dos, +40 por reto, +20 cada 7 días de racha, +3 la pregunta del día, +5 una cartita al día). Con ellas compran muebles (unos 30, en la tienda con su foto 3D), pintura y piso; los acomodan en **Decorar** (mover, girar, guardar, vender a mitad de precio; los cuadros muestran uno de sus dibujos). Sus personajes caminan solos por la casa como en los juegos isométricos (de frente o de espaldas según hacia dónde van, y en espejo a izquierda/derecha), se sientan, se acuestan, bailan con el tocadiscos, riegan las matas y se buscan para abrazarse. Si tocas el piso, tu personaje camina hasta allá; si tocas un mueble, lo usa. Si alguien pospuso, su personaje anda despacito con su nubecita 🌧️.
+- **Tu personaje:** en la casa, **Mi personaje** abre el lienzo con la guía de un monito gordito (cabeza, panza, bracitos y piernitas); se dibuja encima (con **Cuerpo base** pone el de su animalito para decorarlo). La app lo corta en 6 piezas y cada una se mueve sobre su articulación.
+- **Para Eli ☁️:** en la tienda hay un **perrito nube** (si lo tocas o lo abrazan, sale volando con sus orejas), una **mesita de rollitos de canela** y la pintura **Cielo con nubes**.
+- **Nosotros:** la **pregunta del día** (se ve la respuesta del otro al responder la tuya) y las **cartitas "Ábrela cuando…"** (estés triste, me extrañes, no puedas dormir… o un día exacto): llegan cerradas y se abren cuando la otra persona las necesite; a quien la escribió le avisa.
+- **Cartita de novedades:** la primera vez que Eli entra después de publicar, le sale "¡Hola amor! Estuve actualizando la app…" con la lista de lo nuevo (`novedades` en `config.js`; la lista está en `public/js/novedades.js`). Sale una sola vez (el servidor lo recuerda).
 
 ## Probarla en tu computadora
 
@@ -195,6 +205,8 @@ CREATE TABLE avisos (          -- los aparatos que quieren recibir avisos
 CREATE TABLE recordatorios (fecha TEXT PRIMARY KEY);  -- días en que ya salió el recordatorio
 ```
 
+Y para lo nuevo (también se crean solas): `pospuestos` (motivo, de 1 a 10 y por qué), `animos`, `temas_elegidos`, `retos` (lo que cada quien hizo en el reto de la semana, en JSON) y `retos_imagenes`, `monedas` (la alcancía: cada ganancia o gasto con una clave única, así nada se cuenta dos veces; el saldo es la suma), `muebles`, `casa_ajustes` (pintura, piso y si ya se vio la cartita de novedades), `avatares` (el personaje de cada quien, WebP con transparencia), `respuestas` (pregunta del día) y `cartas`. En año nuevo se borran los pospuestos y los retos del año anterior; la casa, las monedas, las respuestas y las cartitas se quedan.
+
 - Cada persona puede tener varios aparatos (hasta 10; los más viejos se borran solos). Si un aparato entra con la otra cuenta, pasa a esa cuenta.
 - Si Apple o Google responden que un aparato ya no existe (desinstalaron la app, quitaron el permiso), se borra de la tabla.
 - `recordatorios` solo guarda la última semana.
@@ -216,6 +228,7 @@ CREATE TABLE recordatorios (fecha TEXT PRIMARY KEY);  -- días en que ya salió 
 - Se puede terminar el dibujo de hoy. El de ayer, gratis hasta las **3:00 a. m.** (por si la medianoche te agarró dibujando; `horasDeGracia` en `config.js`). Después de esa hora, o para otro día de la última semana, hace falta un **comodín**.
 - Comodines: hasta 2 por persona, se recarga 1 cada mes (`comodines` en `config.js`). Solo sirven para días de este año y desde que la pareja empezó a usar la app.
 - El dibujo de la otra persona no se entrega (403) hasta que tú hayas terminado el de ese día.
+- **Posponer** (`lib/racha.js`): solo se pospone el día de hoy, si todavía no dibujaste, y **no dos días seguidos** (uno sí, otro no). Ese día la racha se **congela**: no suma, pero no se rompe. Tienes hasta el final del día siguiente (más la hora de gracia) para hacer el pospuesto, gratis, además del de ese día. Si no lo haces, la racha vuelve a 0: **el día pospuesto no se recupera con comodín** (el otro día, el que no se pospuso, sí). Mientras tengas pendiente el pospuesto, no ves el dibujo de tu pareja de ese día.
 - El **borrador** (mientras dibujas) se guarda solo en el aparato, no en el servidor: si empiezas en el teléfono y sigues en el iPad, no lo verás.
 
 ## Año nuevo
@@ -248,6 +261,20 @@ public/js/mascota.js Garabatito
 public/js/radio.js   la radio de la pantalla de dibujar
 public/sw.js         muestra los avisos (no guarda nada en caché)
 scripts/probar.js    pruebas del servidor
+
+lib/racha.js         la racha, posponer y el nivel del fondo
+lib/retos.js         qué reto toca cada semana · lib/reto-juego.js: cómo se juega cada uno
+lib/casa.js          los muebles (precios, tamaños) y lo que da cada cosa en monedas
+lib/preguntas.js     las preguntas del día · lib/cartas.js: las opciones de "Ábrela cuando…"
+public/js/dibujar.js     la pantalla de dibujar (la usan el día, los retos y el personaje)
+public/js/herramientas.js la barra de herramientas y los colores
+public/js/racha.js   el fondo de la racha · public/js/posponer.js: posponer
+public/js/reto.js    el reto de la semana · public/js/nosotros.js: pregunta y cartitas
+public/js/casa/      la casa en 3D: escena, muebles, personajes y la plantilla del monito
+public/js/novedades.js la cartita de novedades · public/js/nube.js: el perrito nube
+public/vendor/       Three.js y perfect-freehand, ya empaquetados (npm run vendor)
 ```
+
+`public/vendor/` se genera con `npm run vendor` (esbuild): Three.js solo con las piezas que usa la casa (~150 KB comprimido, y se baja solo al entrar a la casa) y perfect-freehand para el pincel de tinta. Ya está en el repositorio: Vercel no tiene que construir nada.
 
 Las tipografías (Bagel Fat One y Mali, licencia SIL OFL) vienen incluidas en `public/fonts`. Los únicos servicios externos son los de avisos (Apple, Google o Mozilla, según el aparato; sin Firebase ni cuentas extra), cron-job.org para el recordatorio y, para la radio, Radio Browser y las propias emisoras. La app funciona sin ellos.

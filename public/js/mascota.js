@@ -4,6 +4,7 @@
 // Ánimos: 'normal', 'feliz' (ojitos de ^ ^) y 'dormido' (de noche, con zzz).
 
 import { h } from './ui.js';
+import { perritoNube } from './nube.js';
 
 const TINTA = '#3a2745';
 
@@ -42,7 +43,7 @@ const OCURRENCIAS = [
   'No tiene que quedar perfecto: tiene que quedar tuyo 💛',
 ];
 
-export function crearMascota() {
+export function crearMascota(opciones = {}) {
   const boton = h('button', { type: 'button', class: 'mascota-boton', 'aria-label': 'Garabatito, la mascota. Tócalo para que diga algo.' });
   boton.innerHTML = DIBUJO;
   const texto = h('p', { class: 'mascota-texto' });
@@ -67,7 +68,19 @@ export function crearMascota() {
   const saltar = () => repetirAnimacion(boton, 'salta');
   const animo = (cual) => { el.dataset.animo = cual || 'normal'; };
 
+  // ☁️ Si lo tocas 7 veces seguiditas, pasa volando el perrito nube.
+  let toques = 0;
+  let ultimoToque = 0;
   boton.addEventListener('click', () => {
+    toques = Date.now() - ultimoToque < 1500 ? toques + 1 : 1;
+    ultimoToque = Date.now();
+    if (toques >= 7) {
+      toques = 0;
+      saltar();
+      decir('¡Mira quién vino a visitarte! ☁️', { siempre: true });
+      perritoNube(opciones.saludo || '☁️ ¡Hola! Soy el perrito nube 💛');
+      return;
+    }
     let i;
     do { i = Math.floor(Math.random() * OCURRENCIAS.length); } while (i === ocurrencia && OCURRENCIAS.length > 1);
     ocurrencia = i;

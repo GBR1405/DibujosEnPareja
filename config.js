@@ -49,6 +49,18 @@ module.exports = {
   // medianoche te agarró dibujando). Después, recuperarlo cuesta un comodín.
   horasDeGracia: 3,
 
+  // Posponer: si un día no puedes dibujar, lo pospones ese mismo día (y explicas por qué).
+  // La racha se congela y al día siguiente tienes que hacer los dos dibujos. No se puede
+  // posponer dos días seguidos, y el día pospuesto no se recupera con comodín.
+  // (Las reglas están en lib/racha.js.)
+  posponer: { largoTexto: 140 },
+
+  // La cartita de "¡Hola amor! Estuve actualizando la app…" con las novedades: le sale una
+  // sola vez a las cuentas de `para` (la primera vez que entran después de publicar). La
+  // firma la cuenta de `de`. Para una tanda nueva de novedades, cambia `id` y la lista en
+  // public/js/novedades.js.
+  novedades: { id: '2026-11', para: ['dos'], de: 'uno' },
+
   // Al empezar un año nuevo se borran todos los dibujos del año anterior.
   // Ponlo en false si prefieren que se queden guardados en la base de datos.
   borrarAlEmpezarAnio: true,
@@ -59,9 +71,11 @@ module.exports = {
 
   // CAMBIEN ESTOS PIN antes de publicar (o usen PIN_UNO y PIN_DOS como variables de
   // entorno). Pueden tener de 4 a 8 números; mientras más largos, mejor: 6 es buen punto.
+  // `carita` es el animalito de cada quien: 'mapache' o 'siames' (también quedan 'gato'
+  // y 'conejo', los de antes). Para intercambiarlos, cambia aquí y vuelve a publicar.
   cuentas: [
-    { id: 'uno', nombre: 'Gabri',   pin: process.env.PIN_UNO || '123456', color: '#ff6f91', carita: 'gato' },
-    { id: 'dos', nombre: 'Eli', pin: process.env.PIN_DOS || '654321', color: '#8fc4ff', carita: 'conejo' },
+    { id: 'uno', nombre: 'Gabri',   pin: process.env.PIN_UNO || '123456', color: '#ff6f91', carita: 'mapache' },
+    { id: 'dos', nombre: 'Eli', pin: process.env.PIN_DOS || '654321', color: '#8fc4ff', carita: 'siames' },
   ],
 
   pinesDeEjemplo: ['123456', '654321'],

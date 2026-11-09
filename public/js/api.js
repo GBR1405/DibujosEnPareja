@@ -31,7 +31,34 @@ export const api = {
   claveAvisos: () => pedir('GET', '/api/avisos/clave'),
   activarAvisos: (aparato) => pedir('POST', '/api/avisos/activar', aparato),
   desactivarAvisos: (endpoint) => pedir('POST', '/api/avisos/desactivar', { endpoint }),
+  // posponer
+  posponer: (cuerpo) => pedir('POST', '/api/posponer', cuerpo),
+  animos: () => pedir('POST', '/api/animos', {}),
+  // reto de la semana
+  reto: () => pedir('GET', '/api/reto'),
+  retos: () => pedir('GET', '/api/retos'),
+  retoDibujo: (cuerpo) => pedir('POST', '/api/reto/dibujo', cuerpo),
+  retoAccion: (accion, cuerpo = {}) => pedir('POST', `/api/reto/${accion}`, cuerpo),
+  // casa
+  casa: () => pedir('GET', '/api/casa'),
+  comprar: (tipo) => pedir('POST', '/api/casa/comprar', { tipo }),
+  poner: (cuerpo) => pedir('POST', '/api/casa/poner', cuerpo),
+  guardarMueble: (id) => pedir('POST', '/api/casa/guardar', { id }),
+  vender: (id) => pedir('POST', '/api/casa/vender', { id }),
+  cuarto: (tipo) => pedir('POST', '/api/casa/cuarto', { tipo }),
+  cuadro: (cuerpo) => pedir('POST', '/api/casa/cuadro', cuerpo),
+  avatar: (imagen) => pedir('POST', '/api/avatar', { imagen }),
+  // pregunta del día y cartitas
+  pregunta: () => pedir('GET', '/api/pregunta'),
+  responder: (texto) => pedir('POST', '/api/pregunta', { texto }),
+  cartas: () => pedir('GET', '/api/cartas'),
+  escribirCarta: (cuerpo) => pedir('POST', '/api/cartas', cuerpo),
+  abrirCarta: (id) => pedir('POST', `/api/cartas/${id}/abrir`, {}),
+  novedadesVistas: () => pedir('POST', '/api/novedades/visto', {}),
 };
+
+export const urlReto = (semana, clave, v) => `/api/reto/imagen/${semana}/${clave}?v=${encodeURIComponent(v)}`;
+export const urlAvatar = (quien, v) => `/api/avatar/${quien}?v=${encodeURIComponent(v)}`;
 
 // `v` (la hora en que se terminó el dibujo) hace que la dirección sea única por dibujo,
 // así el navegador puede guardarlo en su caché para siempre.

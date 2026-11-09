@@ -83,10 +83,73 @@ function renglones(ctx, texto, ancho, max) {
 }
 
 // ------------------------------------------------------------------ piezas
-function fondo(ctx, alto) {
+// Un corazón relleno de tamaño `t` centrado en (x, y).
+function corazon(ctx, x, y, t) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + t * 0.35);
+  ctx.bezierCurveTo(x - t * 0.05, y + t * 0.3, x - t * 0.5, y + t * 0.05, x - t * 0.5, y - t * 0.18);
+  ctx.bezierCurveTo(x - t * 0.5, y - t * 0.45, x - t * 0.12, y - t * 0.5, x, y - t * 0.25);
+  ctx.bezierCurveTo(x + t * 0.12, y - t * 0.5, x + t * 0.5, y - t * 0.45, x + t * 0.5, y - t * 0.18);
+  ctx.bezierCurveTo(x + t * 0.5, y + t * 0.05, x + t * 0.05, y + t * 0.3, x, y + t * 0.35);
+  ctx.fill();
+}
+
+// Una chispita de cuatro puntas.
+function chispa(ctx, x, y, t) {
+  ctx.beginPath();
+  ctx.moveTo(x, y - t);
+  ctx.quadraticCurveTo(x, y, x + t, y);
+  ctx.quadraticCurveTo(x, y, x, y + t);
+  ctx.quadraticCurveTo(x, y, x - t, y);
+  ctx.quadraticCurveTo(x, y, x, y - t);
+  ctx.fill();
+}
+
+// Azar con semilla: la misma postal sale igual cada vez.
+function azar(n) {
+  let a = n >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// El fondo de punticos; con racha, lleva los mismos efectos que la app (lib/racha.js):
+// rosadito (4+), corazones (8+), chispitas (16+), burbujas de luz (31+) y aurora (60+).
+function fondo(ctx, alto, nivel = 0, semilla = 7) {
+  const r = azar(semilla);
   ctx.fillStyle = CIELO;
   ctx.fillRect(0, 0, ANCHO, alto);
-  ctx.fillStyle = CIELO_2;
+  if (nivel >= 1) {
+    const fuerza = [0, 0.28, 0.36, 0.48, 0.56, 0.62][nivel];
+    for (const [cy, rad] of [[0, alto * 0.7], [alto, alto * 0.75]]) {
+      const g = ctx.createRadialGradient(ANCHO / 2, cy, 0, ANCHO / 2, cy, rad);
+      g.addColorStop(0, `rgba(255, 143, 177, ${fuerza})`);
+      g.addColorStop(1, 'rgba(255, 143, 177, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, ANCHO, alto);
+    }
+  }
+  if (nivel >= 5) {
+    // aurora de colores, arriba
+    const g = ctx.createLinearGradient(0, 0, ANCHO, 0);
+    ['#ff9db5', '#ffcf4a', '#7fdcc0', '#8fc4ff', '#c9a8ff', '#ff9db5'].forEach((c, i, l) => g.addColorStop(i / (l.length - 1), c));
+    ctx.save();
+    ctx.globalAlpha = 0.42;
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(ANCHO, 0);
+    ctx.lineTo(ANCHO, 230);
+    for (let x = ANCHO; x >= 0; x -= 40) ctx.lineTo(x, 200 + Math.sin(x / 120) * 46);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle = nivel >= 1 ? 'rgba(211, 205, 248, .8)' : CIELO_2;
   for (let y = 18; y < alto; y += 36) {
     for (let x = 18; x < ANCHO; x += 36) {
       ctx.beginPath();
@@ -94,6 +157,64 @@ function fondo(ctx, alto) {
       ctx.fill();
     }
   }
+  if (nivel >= 4) {
+    for (let i = 0; i < 16; i += 1) {
+      const x = r() * ANCHO;
+      const y = r() * alto;
+      const rad = 40 + r() * 90;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+      g.addColorStop(0, 'rgba(255, 255, 255, .55)');
+      g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    }
+  }
+  if (nivel >= 2) {
+    const colores = ['#ff6f91', '#ff9db5', '#ffb3c7', '#ff7fb0', '#ffcf4a'];
+    const cuantos = [0, 0, 14, 24, 32, 44][nivel];
+    for (let i = 0; i < cuantos; i += 1) {
+      ctx.save();
+      ctx.globalAlpha = 0.3 + r() * 0.4;
+      ctx.fillStyle = colores[i % colores.length];
+      const x = r() * ANCHO;
+      const y = r() * alto;
+      ctx.translate(x, y);
+      ctx.rotate((r() - 0.5) * 0.8);
+      corazon(ctx, 0, 0, 26 + r() * (nivel >= 3 ? 46 : 30));
+      ctx.restore();
+    }
+  }
+  if (nivel >= 3) {
+    const cuantas = [0, 0, 0, 18, 26, 36][nivel];
+    for (let i = 0; i < cuantas; i += 1) {
+      ctx.fillStyle = i % 3 ? 'rgba(255, 255, 255, .9)' : 'rgba(255, 207, 74, .95)';
+      chispa(ctx, r() * ANCHO, r() * alto, 8 + r() * 14);
+    }
+  }
+}
+
+// La cinta de la racha, abajo: "🔥 62 días dibujando juntos".
+function cintaRacha(ctx, y, dias, nivel) {
+  const texto = `${dias} ${dias === 1 ? 'día' : 'días'} dibujando juntos`;
+  ctx.font = `600 32px ${TEXTO}`;
+  const w = ctx.measureText(texto).width + 120;
+  girado(ctx, ANCHO / 2, y, 1.5, () => {
+    ctx.fillStyle = TINTA;
+    redondo(ctx, ANCHO / 2 - w / 2 + 5, y - 30 + 6, w, 60, 30);
+    ctx.fill();
+    ctx.fillStyle = nivel >= 3 ? FRESA : '#ffc2d1';
+    ctx.strokeStyle = TINTA;
+    ctx.lineWidth = 4;
+    redondo(ctx, ANCHO / 2 - w / 2, y - 30, w, 60, 30);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = PAPEL;
+    corazon(ctx, ANCHO / 2 - w / 2 + 42, y + 2, 34);
+    ctx.fillStyle = TINTA;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(texto, ANCHO / 2 + 22, y + 2);
+  });
 }
 
 function cinta(ctx, cx, y) {
@@ -301,7 +422,7 @@ function logo(ctx, y) {
 // ------------------------------------------------------------------ la postal
 // `dibujos`: los dos lados, [{ cuenta, src (o null si no dibujó), nota, autor }],
 // donde `nota` es la reacción que `autor` (la otra persona) le dejó a ese dibujo.
-export async function crearPostal({ fechaTexto, tema, dibujos, emojiDe }) {
+export async function crearPostal({ fechaTexto, tema, dibujos, emojiDe, racha = { dias: 0, nivel: 0 } }) {
   try {
     await Promise.all([`400 76px Bagel`, `400 32px Mali`, `600 32px Mali`].map((f) => document.fonts.load(f)));
   } catch { /* con la letra de reserva también sale bonita */ }
@@ -325,12 +446,13 @@ export async function crearPostal({ fechaTexto, tema, dibujos, emojiDe }) {
   const yTema = 170;
   const yFotos = yTema + altoTema + 78;
   const yNotitas = yFotos + FOTO.alto + 62;
+  const conRacha = racha.nivel >= 1 && racha.dias > 0;
   const yLogo = yNotitas + altoNotitas + 96;
-  const alto = yLogo + 210;
+  const alto = yLogo + 210 + (conRacha ? 90 : 0);
 
   lienzo.width = ANCHO;
   lienzo.height = alto;
-  fondo(ctx, alto);
+  fondo(ctx, alto, racha.nivel, [...fechaTexto].reduce((s, c) => s + c.charCodeAt(0), 0));
 
   ctx.fillStyle = TINTA_2;
   ctx.font = `600 36px ${TEXTO}`;
@@ -350,6 +472,7 @@ export async function crearPostal({ fechaTexto, tema, dibujos, emojiDe }) {
   ctx.font = `600 30px ${TEXTO}`;
   ctx.textAlign = 'center';
   ctx.fillText('Un ratito para dibujar juntos, cada día.', ANCHO / 2, yLogo + 150);
+  if (conRacha) cintaRacha(ctx, yLogo + 230, racha.dias, racha.nivel);
 
   return new Promise((ok, fallo) => {
     lienzo.toBlob((b) => (b ? ok(b) : fallo(new Error('sin imagen'))), 'image/png');

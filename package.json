@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node scripts/probar.js"
+    "test": "node --expose-gc scripts/probar.js",
+    "vendor": "node scripts/vendor.js"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
@@ -16,5 +17,10 @@
   "private": true,
   "engines": {
     "node": "22.x"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12",
+    "perfect-freehand": "^1.2.3",
+    "three": "^0.187.0"
   }
 }

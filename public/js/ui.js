@@ -76,7 +76,7 @@ export function hoja({ titulo, contenido, acciones = [], alCerrar, clase = '' })
   }
   document.addEventListener('keydown', alTeclado);
   document.body.append(fondo);
-  (botones[botones.length - 1] || panel).focus?.();
+  (botones[botones.length - 1] || panel).focus?.({ preventScroll: true });
   return { cerrar };
 }
 

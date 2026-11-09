@@ -5,19 +5,28 @@ const express = require('express');
 
 const config = require('./config');
 const { abrir } = require('./lib/base');
-const { comprimir } = require('./lib/imagen');
+const { comprimir, comprimirAvatar } = require('./lib/imagen');
 const { temaDelDia } = require('./lib/tema-del-dia');
 const { crearAvisos } = require('./lib/avisos');
 const { REACCIONES, reaccionPorId, LARGO_COMENTARIO } = require('./lib/reacciones');
 const { crearRadio } = require('./lib/radio');
 const { saldo, siguienteMes } = require('./lib/comodines');
+const { calcularRacha, nivelDeRacha, pospuestoATiempo, limitePospuesto, MOTIVOS } = require('./lib/racha');
+const RETOS = require('./lib/retos');
+const JUEGO = require('./lib/reto-juego');
+const CASA = require('./lib/casa');
+const { preguntaDelDia, LARGO_RESPUESTA } = require('./lib/preguntas');
+const CARTAS = require('./lib/cartas');
 const F = require('./lib/fecha');
 
 // ---------------------------------------------------------------- arranque
 const cuentas = config.cuentas;
 const porId = new Map(cuentas.map((c) => [c.id, c]));
+const IDS = cuentas.map((c) => c.id);
+const NOMBRES = Object.fromEntries(cuentas.map((c) => [c.id, c.nombre]));
 const parejaDe = (id) => cuentas.find((c) => c.id !== id).id;
 const hoy = () => F.claveDeHoy(config.zonaHoraria);
+const G = CASA.GANANCIAS;
 
 const base = abrir(config.turso);
 const avisos = crearAvisos({ base, claves: config.avisos });
@@ -131,6 +140,33 @@ function leerAparato(cuerpo) {
   return { endpoint, p256dh: keys.p256dh, auth: keys.auth };
 }
 
+// El tema de cada día: el de la lista (lib/temas.js), salvo que alguien lo haya elegido
+// en el reto "Tú eliges el tema". Devuelve una función fecha -> tema para ese rango.
+async function temasEntre(desde, hasta) {
+  const elegidos = new Map((await base.temasElegidosEntre(desde, hasta)).map((e) => [e.fecha, e]));
+  const tema = (fecha) => (elegidos.has(fecha) ? elegidos.get(fecha).tema : temaDelDia(fecha));
+  tema.quienEligio = (fecha) => (elegidos.has(fecha) ? elegidos.get(fecha).quien : null);
+  return tema;
+}
+const temaDe = async (fecha) => (await temasEntre(fecha, fecha))(fecha);
+
+// Un texto de una sola línea, sin espacios de más, de 1 a `max` letras (o undefined).
+function leerTexto(texto, max, { lineas = false } = {}) {
+  if (typeof texto !== 'string') return undefined;
+  const limpio = lineas
+    ? texto.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, ' ').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
+    : texto.replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim();
+  const largo = [...limpio].length;
+  return largo >= 1 && largo <= max ? limpio : undefined;
+}
+
+// Una imagen que manda la app como data URL (PNG, WebP o JPEG). Devuelve el Buffer o null.
+function leerDataUrl(imagen, formatos = 'png|webp|jpeg') {
+  const re = new RegExp(`^data:image\\/(?:${formatos});base64,([A-Za-z0-9+/]+={0,2})$`);
+  const m = re.exec(typeof imagen === 'string' && imagen.length < 2_800_000 ? imagen : '');
+  return m ? Buffer.from(m[1], 'base64') : null;
+}
+
 // Cuando alguien termina el dibujo de hoy, se le avisa a la otra persona.
 function avisarALaPareja(yo, fecha) {
   const otra = parejaDe(yo);
@@ -141,10 +177,13 @@ function avisarALaPareja(yo, fecha) {
       quien: otra,
       mensaje: yaDibujo
         ? { titulo: `Ya puedes ver el dibujo de ${nombre} 💛`, texto: 'Ábrelo en Garabatos.', tag: 'pareja', ttl: 6 * HORAS }
-        : { titulo: `${nombre} ya dibujó, ¡te toca! 🎨`, texto: `Hoy toca dibujar: ${temaDelDia(fecha)}.`, tag: 'pareja', ttl: 6 * HORAS },
+        : { titulo: `${nombre} ya dibujó, ¡te toca! 🎨`, texto: `Hoy toca dibujar: ${await temaDe(fecha)}.`, tag: 'pareja', ttl: 6 * HORAS },
     }];
   });
 }
+
+// Un aviso cualquiera para la pareja de `yo`.
+const avisarA = (quien, titulo, texto, { tag = 'pareja', ttl = 12 * HORAS } = {}) => avisos.avisar([{ quien, mensaje: { titulo, texto, tag, ttl } }]);
 
 // ---------------------------------------------------------------- reacciones
 // Lo que ve la app de una reacción: { reaccion, comentario }, o null si no hay nada.
@@ -213,12 +252,18 @@ async function recordatorio(req, res) {
   if (!(await base.marcarRecordatorio(fecha, F.sumarDias(fecha, -7)))) {
     return res.json({ ok: true, fecha, enviados: 0, nota: 'ya_se_mando_hoy' });
   }
-  const terminaron = await base.terminaronEl(fecha);
-  const faltan = cuentas.filter((c) => !terminaron.includes(c.id));
-  const tema = temaDelDia(fecha);
+  const ayer = F.sumarDias(fecha, -1);
+  const [terminaron, terminaronAyer, pospuestos, tema] = await Promise.all([
+    base.terminaronEl(fecha), base.terminaronEl(ayer), base.pospuestosEntre(ayer, fecha), temaDe(fecha),
+  ]);
+  const pospuso = (quien, dia) => pospuestos.some((p) => p.quien === quien && p.fecha === dia);
+  // A quien pospuso hoy no se le insiste; a quien pospuso ayer se le recuerda que hoy son dos.
+  const faltan = cuentas.filter((c) => !terminaron.includes(c.id) && !pospuso(c.id, fecha));
   const { enviados } = await avisos.avisar(faltan.map((c) => ({
     quien: c.id,
-    mensaje: { titulo: `Hoy toca dibujar: ${tema}. ¿Te animas? ✏️`, texto: `Un ratito para dibujar con ${porId.get(parejaDe(c.id)).nombre}.`, tag: 'recordatorio', ttl: 12 * HORAS },
+    mensaje: pospuso(c.id, ayer) && !terminaronAyer.includes(c.id)
+      ? { titulo: 'Hoy te tocan dos dibujos ✏️✏️', texto: `El que pospusiste ayer y el de hoy (${tema}). ¡Que no se pierda la racha!`, tag: 'recordatorio', ttl: 12 * HORAS }
+      : { titulo: `Hoy toca dibujar: ${tema}. ¿Te animas? ✏️`, texto: `Un ratito para dibujar con ${porId.get(parejaDe(c.id)).nombre}.`, tag: 'recordatorio', ttl: 12 * HORAS },
   })), { tope: 5000 });
   return res.json({ ok: true, fecha, enviados, avisados: faltan.map((c) => c.nombre) });
 }
@@ -239,12 +284,19 @@ const enGracia = () => F.horaEn(config.zonaHoraria) < config.horasDeGracia;
 
 // Los comodines de `quien`: cuántos le quedan, cuándo llega el próximo, y qué días puede
 // recuperar (los de la ventana que no dibujó, desde el primer dibujo de la pareja).
+// Los días que pospuso no se recuperan con comodín: van aparte, en `pendientes`, mientras
+// todavía esté a tiempo de dibujarlos (gratis).
 async function infoComodines(quien, hoy) {
   const { maximo, porMes, diasAtras } = config.comodines;
-  const { dibujados, primera, usos } = await base.estadoComodines(quien, F.sumarDias(hoy, -diasAtras), hoy);
+  const desde = F.sumarDias(hoy, -diasAtras);
+  const [{ dibujados, primera, usos, pospuestos }, tema] = await Promise.all([
+    base.estadoComodines(quien, desde, hoy),
+    temasEntre(desde, hoy),
+  ]);
   const mes = hoy.slice(0, 7);
   const quedan = saldo(usos, mes, { maximo, porMes });
   const hechos = new Set(dibujados);
+  const pospuse = new Set(pospuestos.map((p) => p.fecha));
   const ventana = [];
   for (let d = 1; d <= diasAtras; d += 1) {
     const fecha = F.sumarDias(hoy, -d);
@@ -252,13 +304,35 @@ async function infoComodines(quien, hoy) {
     ventana.push(fecha);
   }
   const ayer = F.sumarDias(hoy, -1);
+  const gracia = enGracia();
   return {
     quedan,
     maximo,
     proximo: quedan < maximo ? `${siguienteMes(mes)}-01` : null,
     ventana,
-    perdidos: ventana.filter((f) => !hechos.has(f)).map((fecha) => ({ fecha, tema: temaDelDia(fecha), gratis: fecha === ayer && enGracia() })),
+    pospuse,
+    perdidos: ventana.filter((f) => !hechos.has(f) && !pospuse.has(f)).map((fecha) => ({ fecha, tema: tema(fecha), gratis: fecha === ayer && gracia })),
+    pendientes: pospuestos
+      .filter((p) => p.fecha !== hoy && !hechos.has(p.fecha) && pospuestoATiempo(p.fecha, hoy, gracia))
+      .map((p) => ({ fecha: p.fecha, tema: tema(p.fecha), motivo: p.motivo, nivel: p.nivel, texto: p.texto, hasta: limitePospuesto(p.fecha) })),
   };
+}
+
+// ¿`quien` tiene pendiente (pospuesto y todavía a tiempo) el dibujo de `fecha`? Mientras
+// sea así, no puede ver el dibujo de su pareja de ese día (como si fuera hoy).
+async function tienePendiente(quien, fecha, hoy) {
+  if (fecha >= hoy || !pospuestoATiempo(fecha, hoy, enGracia())) return false;
+  const [pospuestos, terminaron] = await Promise.all([base.pospuestosEntre(fecha, fecha), base.terminaronEl(fecha)]);
+  return pospuestos.some((p) => p.quien === quien) && !terminaron.includes(quien);
+}
+
+// Las monedas que da un dibujo terminado: el suyo y, si ya dibujaron los dos ese día, el
+// extra de pareja. Devuelve cuántas se ganaron.
+async function ganarPorDibujo(quien, fecha) {
+  const terminaron = await base.terminaronEl(fecha);
+  const filas = [{ clave: `dibujo:${fecha}:${quien}`, quien, cantidad: G.dibujo, motivo: 'dibujo' }];
+  if (IDS.every((q) => terminaron.includes(q))) filas.push({ clave: `pareja:${fecha}`, quien: null, cantidad: G.pareja, motivo: 'pareja' });
+  return base.sumarMonedas(filas);
 }
 
 function avisarRecuperado(yo, fecha) {
@@ -335,39 +409,86 @@ app.post('/api/salir', async (req, res) => {
 // Todo lo de abajo exige haber entrado.
 app.use('/api', requiereSesion);
 
-app.get('/api/yo', (req, res) => {
+// La cartita de novedades (config.novedades): ¿le toca verla a esta cuenta?
+const claveNovedades = (quien) => `novedades:${config.novedades.id}:${quien}`;
+async function tocaNovedades(quien) {
+  const n = config.novedades;
+  if (!n || !n.para.includes(quien)) return null;
+  const ajustes = await base.ajustesCasa();
+  return ajustes[claveNovedades(quien)] ? null : { id: n.id, de: n.de };
+}
+
+app.get('/api/yo', async (req, res) => {
   const ver = ({ id, nombre, color, carita }) => ({ id, nombre, color, carita });
   res.json({
     yo: ver(porId.get(req.yo)),
     pareja: ver(porId.get(parejaDe(req.yo))),
     reacciones: REACCIONES,
     largoComentario: LARGO_COMENTARIO,
+    novedades: await tocaNovedades(req.yo),
   });
 });
 
-// Días seguidos (hasta hoy, o hasta ayer si hoy aún no han terminado los dos).
-function calcularRacha(fechas, fecha) {
-  const completos = new Set(fechas);
-  let dia = completos.has(fecha) ? fecha : F.sumarDias(fecha, -1);
-  let n = 0;
-  while (completos.has(dia) && n < 400) { n += 1; dia = F.sumarDias(dia, -1); }
-  return n;
+app.post('/api/novedades/visto', async (req, res) => {
+  if (config.novedades) await base.guardarAjuste(claveNovedades(req.yo), new Date().toISOString());
+  res.json({ ok: true });
+});
+
+// Fecha -> Set de quiénes, a partir de filas { fecha, quien }.
+function porFecha(filas) {
+  const m = new Map();
+  for (const f of filas) {
+    if (!m.has(f.fecha)) m.set(f.fecha, new Set());
+    m.get(f.fecha).add(f.quien);
+  }
+  return m;
 }
+const sinQuien = (p) => (p ? { motivo: p.motivo, nivel: p.nivel, texto: p.texto } : null);
+
+// La alcancía se pone al día (con los dibujos de antes de que existiera) una vez al día.
+let alcanciaRevisada = null;
 
 app.get('/api/hoy', async (req, res) => {
   const fecha = req.hoy;
+  const ayer = F.sumarDias(fecha, -1);
   const otra = parejaDe(req.yo);
-  const [{ deHoy, fechasCompletas, reacciones }, comodines] = await Promise.all([
-    base.resumenDeHoy(fecha),
+  if (alcanciaRevisada !== fecha) {
+    await base.sincronizarMonedas({ dibujo: G.dibujo, pareja: G.pareja });
+    alcanciaRevisada = fecha;
+  }
+  const [resumen, comodines, tema] = await Promise.all([
+    base.resumenDeHoy(fecha, F.sumarDias(fecha, -2)),
     infoComodines(req.yo, fecha),
+    temasEntre(fecha, fecha),
   ]);
+  const { deHoy, fechasCompletas, reacciones, recientes, pospuestos } = resumen;
   const mio = deHoy.find((f) => f.quien === req.yo);
   const suyo = deHoy.find((f) => f.quien === otra);
   const notaDe = (quien) => verNota(reacciones.find((r) => r.quien === quien));
+  const gracia = enGracia();
+
+  const racha = calcularRacha({
+    completos: fechasCompletas, recientes: porFecha(recientes), pospuestos: porFecha(pospuestos), quienes: IDS, hoy: fecha, enGracia: gracia,
+  });
+  // Cada 7 días de racha, un premio para la alcancía (una sola vez por día).
+  let saldoMonedas = resumen.saldo;
+  if (mio && suyo && racha > 0 && racha % 7 === 0) {
+    saldoMonedas += await base.sumarMonedas([{ clave: `semana:${fecha}`, quien: null, cantidad: G.semana, motivo: 'racha' }]);
+  }
+
+  // Posponer: hoy, si no he dibujado, no lo pospuse ya y no lo pospuse ayer.
+  const pospusoEl = (quien, dia) => pospuestos.find((p) => p.quien === quien && p.fecha === dia) || null;
+  const porque = mio ? 'ya_dibujaste' : pospusoEl(req.yo, fecha) ? 'ya_pospusiste' : pospusoEl(req.yo, ayer) ? 'ayer_pospusiste' : null;
+  const dibujoEl = (quien, dia) => recientes.some((r) => r.quien === quien && r.fecha === dia);
+  const suyosPendientes = pospuestos
+    .filter((p) => p.quien === otra && p.fecha !== fecha && !dibujoEl(otra, p.fecha) && pospuestoATiempo(p.fecha, fecha, gracia))
+    .map((p) => ({ fecha: p.fecha, motivo: p.motivo }));
 
   res.json({
     fecha,
-    tema: temaDelDia(fecha),
+    tema: tema(fecha),
+    // Si el tema de hoy lo eligió alguien (reto "Tú eliges el tema").
+    temaElegidoPor: tema.quienEligio(fecha),
     yoListo: Boolean(mio),
     parejaListo: Boolean(suyo),
     miV: mio ? mio.creado : null,
@@ -375,10 +496,23 @@ app.get('/api/hoy', async (req, res) => {
     parejaV: mio && suyo ? suyo.creado : null,
     // La reacción que mi pareja le dejó a mi dibujo, y la que yo le dejé al suyo.
     notas: { mio: mio ? notaDe(req.yo) : null, suyo: mio && suyo ? notaDe(otra) : null },
-    racha: calcularRacha(fechasCompletas, fecha),
+    racha,
+    nivelRacha: nivelDeRacha(racha),
+    monedas: saldoMonedas,
     // Mis comodines y los días que se me pasaron y todavía puedo recuperar.
     comodines: { quedan: comodines.quedan, maximo: comodines.maximo, proximo: comodines.proximo },
     perdidos: comodines.perdidos,
+    posponer: {
+      puedo: !porque,
+      porque,
+      mio: sinQuien(pospusoEl(req.yo, fecha)),
+      suyo: sinQuien(pospusoEl(otra, fecha)),
+      // Los días que pospuse y todavía tengo que dibujar (gratis, sin comodín).
+      pendientes: comodines.pendientes,
+      suyosPendientes,
+      motivos: Object.values(MOTIVOS),
+      largoTexto: config.posponer.largoTexto,
+    },
     horasDeGracia: config.horasDeGracia,
     anio: F.anioDe(fecha),
     diasParaReinicio: F.diasHastaFinDeAnio(fecha),
@@ -388,19 +522,27 @@ app.get('/api/hoy', async (req, res) => {
 app.post('/api/terminar', async (req, res) => {
   const { fecha, imagen, comodin } = req.body || {};
   if (!F.esFecha(fecha) || fecha > req.hoy || F.anioDe(fecha) !== F.anioDe(req.hoy)) return res.status(400).json({ error: 'fecha_invalida' });
-  // Un día anterior (fuera de la gracia de ayer) solo con comodín, pedido a propósito.
+  // Un día anterior (fuera de la gracia de ayer) solo con comodín, pedido a propósito,
+  // salvo que sea un día que pospuse y todavía estoy a tiempo (ese es gratis). Un día
+  // pospuesto que ya se pasó no se recupera ni con comodín.
   let comodines = null;
+  let pospuesto = false;
   if (fecha !== req.hoy && !(fecha === F.sumarDias(req.hoy, -1) && enGracia())) {
-    if (comodin !== true) return res.status(400).json({ error: 'fecha_invalida' });
-    comodines = await infoComodines(req.yo, req.hoy);
-    if (!comodines.ventana.includes(fecha)) return res.status(400).json({ error: 'fecha_invalida' });
-    if (comodines.quedan < 1) return res.status(403).json({ error: 'sin_comodines', proximo: comodines.proximo });
+    const info = await infoComodines(req.yo, req.hoy);
+    if (info.pendientes.some((p) => p.fecha === fecha)) {
+      pospuesto = true;
+    } else {
+      if (info.pospuse.has(fecha)) return res.status(400).json({ error: 'pospuesto_vencido' });
+      if (comodin !== true) return res.status(400).json({ error: 'fecha_invalida' });
+      if (!info.ventana.includes(fecha)) return res.status(400).json({ error: 'fecha_invalida' });
+      if (info.quedan < 1) return res.status(403).json({ error: 'sin_comodines', proximo: info.proximo });
+      comodines = info;
+    }
   }
 
-  const m = /^data:image\/(?:png|webp|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/.exec(typeof imagen === 'string' && imagen.length < 2_800_000 ? imagen : '');
-  if (!m) return res.status(400).json({ error: 'imagen_invalida' });
-
-  const listo = await comprimir(Buffer.from(m[1], 'base64'), config.imagen);
+  const buffer = leerDataUrl(imagen);
+  if (!buffer) return res.status(400).json({ error: 'imagen_invalida' });
+  const listo = await comprimir(buffer, config.imagen);
   if (!listo) return res.status(400).json({ error: 'imagen_invalida' });
 
   const dibujo = { fecha, quien: req.yo, imagen: listo.imagen, mini: listo.mini };
@@ -408,11 +550,44 @@ app.post('/api/terminar', async (req, res) => {
     ? await base.guardarConComodin({ ...dibujo, mes: req.hoy.slice(0, 7) })
     : await base.guardar(dibujo);
   if (!guardado) return res.status(409).json({ error: 'ya_terminado' });
-  // El dibujo de hoy avisa a la pareja, y también recuperar un día con comodín (terminar
-  // el de ayer a medianoche no). Tarda como mucho ~3 s y nunca falla.
+  const ganadas = await ganarPorDibujo(req.yo, fecha);
+  // El dibujo de hoy avisa a la pareja, y también recuperar un día con comodín o hacer el
+  // pospuesto (terminar el de ayer a medianoche no). Tarda como mucho ~3 s y nunca falla.
   if (fecha === req.hoy) await avisarALaPareja(req.yo, fecha);
   else if (comodines) await avisarRecuperado(req.yo, fecha);
-  return res.json({ ok: true, bytes: listo.imagen.length, ...(comodines ? { comodines: comodines.quedan - 1 } : {}) });
+  else if (pospuesto) await avisarA(parejaDe(req.yo), `${NOMBRES[req.yo]} hizo el dibujo que había pospuesto 💪`, `El del ${F.fechaCorta(fecha)}. ¡La racha sigue!`);
+  return res.json({ ok: true, bytes: listo.imagen.length, monedas: ganadas, ...(comodines ? { comodines: comodines.quedan - 1 } : {}) });
+});
+
+// ---- posponer
+// Hoy no puedo dibujar: lo pospongo, digo por qué (ocupado o me siento mal, de 1 a 10 y
+// un textito). Solo hoy, si no he dibujado, y si no lo pospuse ayer.
+app.post('/api/posponer', async (req, res) => {
+  const { motivo, nivel, texto } = req.body || {};
+  if (!MOTIVOS[motivo]) return res.status(400).json({ error: 'motivo_invalido' });
+  if (!Number.isInteger(nivel) || nivel < 1 || nivel > 10) return res.status(400).json({ error: 'nivel_invalido' });
+  const porque = leerTexto(texto, config.posponer.largoTexto);
+  if (!porque) return res.status(400).json({ error: 'texto_invalido' });
+
+  const fecha = req.hoy;
+  const ayer = F.sumarDias(fecha, -1);
+  const [terminaron, pospuestos] = await Promise.all([base.terminaronEl(fecha), base.pospuestosEntre(ayer, fecha)]);
+  if (terminaron.includes(req.yo)) return res.status(409).json({ error: 'ya_dibujaste' });
+  if (pospuestos.some((p) => p.quien === req.yo && p.fecha === ayer)) return res.status(403).json({ error: 'ayer_pospusiste' });
+  if (!(await base.guardarPospuesto({ fecha, quien: req.yo, motivo, nivel, texto: porque }))) return res.status(409).json({ error: 'ya_pospusiste' });
+
+  await avisarA(parejaDe(req.yo), `${NOMBRES[req.yo]} pospuso el dibujo de hoy ${MOTIVOS[motivo].emoji}`, `${MOTIVOS[motivo].nombre} (${nivel}/10): «${porque}»`);
+  return res.json({ ok: true });
+});
+
+// Mandarle ánimos a mi pareja cuando pospuso (una vez al día).
+app.post('/api/animos', async (req, res) => {
+  const otra = parejaDe(req.yo);
+  const pospuestos = await base.pospuestosEntre(F.sumarDias(req.hoy, -1), req.hoy);
+  if (!pospuestos.some((p) => p.quien === otra)) return res.status(400).json({ error: 'no_pospuso' });
+  if (!(await base.marcarAnimos(req.hoy, req.yo))) return res.status(409).json({ error: 'ya_mandaste' });
+  await avisarA(otra, `${NOMBRES[req.yo]} te manda ánimos 💛`, '¡Tú puedes! Aquí te esperan para dibujar juntos.', { tag: 'animos' });
+  return res.json({ ok: true });
 });
 
 // ---- reacciones
@@ -431,7 +606,7 @@ app.post('/api/reaccion', async (req, res) => {
   const otra = parejaDe(req.yo);
   const terminaron = await base.terminaronEl(fecha);
   if (!terminaron.includes(otra)) return res.status(404).json({ error: 'sin_dibujo' });
-  if (!terminaron.includes(req.yo) && fecha >= req.hoy) return res.status(403).json({ error: 'todavia_no' });
+  if (!terminaron.includes(req.yo) && (fecha >= req.hoy || await tienePendiente(req.yo, fecha, req.hoy))) return res.status(403).json({ error: 'todavia_no' });
 
   const antes = verNota(await base.reaccionDe(fecha, otra));
   const ahora = {
@@ -471,7 +646,7 @@ app.get('/api/dibujo/:fecha/:quien', async (req, res) => {
 
   const fila = await base.leerImagen({ fecha, quien, yo: req.yo, mini: Boolean(req.query.mini) });
   if (!fila) return res.status(404).end();
-  if (quien !== req.yo && !fila.tengoMio && fecha >= req.hoy) return res.status(403).end();
+  if (quien !== req.yo && !fila.tengoMio && (fecha >= req.hoy || await tienePendiente(req.yo, fecha, req.hoy))) return res.status(403).end();
 
   res.set({ 'Content-Type': 'image/webp', 'Cache-Control': 'private, max-age=31536000, immutable' });
   return res.send(fila.datos);
@@ -491,11 +666,17 @@ app.get('/api/mes/:mes', async (req, res) => {
   if (!m || +m[1] !== anio || +m[2] < 1 || +m[2] > 12) return res.status(400).json({ error: 'mes_invalido' });
 
   const numero = +m[2];
-  const [filas, reacciones] = await Promise.all([
+  const desde = `${req.params.mes}-01`;
+  const hasta = `${req.params.mes}-31`;
+  const [filas, reacciones, pospuestos, tema] = await Promise.all([
     base.mes(anio, numero),
-    base.reaccionesEntre(`${req.params.mes}-01`, `${req.params.mes}-31`),
+    base.reaccionesEntre(desde, hasta),
+    base.pospuestosEntre(desde, hasta),
+    temasEntre(desde, hasta),
   ]);
   const notas = new Map(reacciones.map((r) => [`${r.fecha}/${r.quien}`, verNota(r)]));
+  const pospuso = new Map(pospuestos.map((p) => [`${p.fecha}/${p.quien}`, sinQuien(p)]));
+  const gracia = enGracia();
   const porDia = new Map();
   for (const f of filas) {
     if (!porDia.has(f.fecha)) porDia.set(f.fecha, {});
@@ -511,11 +692,16 @@ app.get('/api/mes/:mes', async (req, res) => {
     const reg = porDia.get(fecha) || {};
     const mio = reg[req.yo];
     const suyo = reg[otra];
-    const visible = Boolean(suyo) && (Boolean(mio) || fecha < req.hoy);
+    // Un día que pospuse y todavía puedo dibujar se comporta como "hoy": no veo el de mi pareja.
+    const miPospuesto = pospuso.get(`${fecha}/${req.yo}`) || null;
+    const pendiente = !mio && miPospuesto && fecha < req.hoy && pospuestoATiempo(fecha, req.hoy, gracia);
+    const visible = Boolean(suyo) && (Boolean(mio) || (fecha < req.hoy && !pendiente));
     dias.push({
       fecha,
       futuro,
-      tema: futuro ? null : temaDelDia(fecha),
+      tema: futuro ? null : tema(fecha),
+      temaElegidoPor: futuro ? null : tema.quienEligio(fecha),
+      pospuesto: { yo: miPospuesto, pareja: pospuso.get(`${fecha}/${otra}`) || null, pendiente: Boolean(pendiente) },
       yo: mio ? { v: mio.creado, mini: url(mio.mini), nota: notas.get(`${fecha}/${req.yo}`) || null, recuperado: mio.recuperado } : null,
       pareja: suyo ? {
         v: suyo.creado, visible, mini: visible ? url(suyo.mini) : null, nota: (visible && notas.get(`${fecha}/${otra}`)) || null, recuperado: suyo.recuperado,
@@ -523,6 +709,290 @@ app.get('/api/mes/:mes', async (req, res) => {
     });
   }
   res.json({ hoy: req.hoy, anio, dias });
+});
+
+// ---------------------------------------------------------------- reto de la semana
+const retoDe = (fecha) => RETOS.retoDeLaSemana(fecha, IDS);
+const verReto = (reto, guardado, yo, hoyFecha) => JUEGO.vista(reto, guardado, yo, NOMBRES, { hoy: hoyFecha });
+
+// Después de cada paso del reto: si se completó, el premio (una vez) y un aviso; si no,
+// y ahora le toca a la otra persona, un aviso para que sepa.
+async function despuesDelReto(reto, resultado, yo, hoyFecha) {
+  const otra = parejaDe(yo);
+  if (resultado.recienCompletado) {
+    const acerto = reto.tipo === 'adivina' && resultado.datos.acertado === true;
+    await base.sumarMonedas([{ clave: `reto:${reto.semana}`, quien: null, cantidad: JUEGO.PREMIO + (acerto ? JUEGO.PREMIO_ACERTAR : 0), motivo: 'reto' }]);
+    await avisarA(otra, `¡Completaron el reto de la semana! ${reto.emoji}`, `${reto.nombre}: entra a verlo. +${JUEGO.PREMIO + (acerto ? JUEGO.PREMIO_ACERTAR : 0)} 🪙 para la casa.`, { tag: 'reto' });
+    return;
+  }
+  const suya = verReto(reto, { datos: resultado.datos, completado: resultado.completado }, otra, hoyFecha);
+  if (suya.fase === 'mi_turno') await avisarA(otra, `¡Te toca en el reto! ${reto.emoji}`, `${reto.nombre}: ${suya.texto}`, { tag: 'reto' });
+}
+
+app.get('/api/reto', async (req, res) => {
+  const reto = retoDe(req.hoy);
+  const guardado = await base.leerReto(reto.semana);
+  res.set('Cache-Control', 'no-store');
+  res.json({ reto: verReto(reto, guardado, req.yo, req.hoy) });
+});
+
+// Los retos de las semanas anteriores (los más nuevos primero).
+app.get('/api/retos', async (req, res) => {
+  const lista = await base.retosAnteriores(retoDe(req.hoy).semana, 12);
+  res.json({ retos: lista.map((g) => verReto(retoDe(g.semana), g, req.yo, req.hoy)) });
+});
+
+// El dibujo que me toca en el reto (el servidor sabe en qué lugar va).
+app.post('/api/reto/dibujo', async (req, res) => {
+  const reto = retoDe(req.hoy);
+  const guardado = await base.leerReto(reto.semana);
+  const plan = JUEGO.planDeDibujo(reto, (guardado && guardado.datos) || {}, req.yo);
+  if (!plan) return res.status(409).json({ error: 'no_te_toca' });
+  const buffer = leerDataUrl(req.body?.imagen);
+  const listo = buffer && await comprimir(buffer, config.imagen);
+  if (!listo) return res.status(400).json({ error: 'imagen_invalida' });
+  const titulo = plan.pideTitulo ? leerTexto(req.body.titulo, 40) || null : null;
+
+  if (!(await base.guardarImagenReto({ semana: reto.semana, clave: plan.clave, imagen: listo.imagen, mini: listo.mini }))) {
+    return res.status(409).json({ error: 'ya_terminado' });
+  }
+  const creado = new Date().toISOString();
+  const resultado = await base.actualizarReto(reto.semana, reto.tipo, (d) => ({
+    ...d, imgs: { ...(d.imgs || {}), [plan.clave]: creado }, ...(titulo ? { titulo } : {}),
+  }), { completo: (d) => JUEGO.completo(reto.tipo, d) });
+  await despuesDelReto(reto, resultado, req.yo, req.hoy);
+  return res.json({ ok: true, reto: verReto(reto, resultado, req.yo, req.hoy) });
+});
+
+// Las demás acciones: tema, palabra, adivinar, colores, mirar.
+app.post('/api/reto/:accion', async (req, res) => {
+  const reto = retoDe(req.hoy);
+  const { accion } = req.params;
+  if (!['tema', 'palabra', 'adivinar', 'colores', 'mirar'].includes(accion)) return res.status(404).json({ error: 'no_existe' });
+  const manana = F.sumarDias(req.hoy, 1);
+  let resultado;
+  try {
+    resultado = await base.actualizarReto(
+      reto.semana,
+      reto.tipo,
+      (datos) => JUEGO.aplicar(reto, datos, req.yo, accion, req.body || {}, { hoy: req.hoy, manana }),
+      {
+        completo: (d) => JUEGO.completo(reto.tipo, d),
+        // El tema elegido se vuelve el tema de mañana para los dos.
+        extra: (d) => (accion === 'tema' ? [{
+          sql: 'INSERT INTO temas_elegidos (fecha, tema, quien, creado) VALUES (?, ?, ?, ?) ON CONFLICT (fecha) DO NOTHING',
+          args: [d.fecha, d.tema, req.yo, new Date().toISOString()],
+        }] : []),
+      },
+    );
+  } catch (e) {
+    if (!e.codigo) throw e;
+    return res.status(e.codigo === 'reto_ocupado' || e.codigo === 'ya_hecho' ? 409 : 400).json({ error: e.codigo });
+  }
+  await despuesDelReto(reto, resultado, req.yo, req.hoy);
+  return res.json({ ok: true, reto: verReto(reto, resultado, req.yo, req.hoy) });
+});
+
+app.get('/api/reto/imagen/:semana/:clave', async (req, res) => {
+  const { semana, clave } = req.params;
+  if (!F.esFecha(semana) || !/^[a-z]{2,10}$/.test(clave)) return res.status(404).end();
+  const guardado = await base.leerReto(semana);
+  if (!guardado) return res.status(404).end();
+  const reto = retoDe(semana);
+  if (!JUEGO.puedeVer(reto, guardado.datos, req.yo, clave)) return res.status(403).end();
+  const datos = await base.leerImagenReto(semana, clave, Boolean(req.query.mini));
+  if (!datos) return res.status(404).end();
+  // El dibujo que se mira 10 segundos (reto "De memoria") no se guarda en la caché.
+  const fugaz = reto.tipo === 'memoria' && clave === 'dibujo' && req.yo !== reto.primero && !JUEGO.completo(reto.tipo, guardado.datos);
+  res.set({ 'Content-Type': 'image/webp', 'Cache-Control': fugaz ? 'no-store' : 'private, max-age=31536000, immutable' });
+  return res.send(datos);
+});
+
+// ---------------------------------------------------------------- la casa
+const tieneEl = (muebles, id) => CASA.muebleDe(id)?.precio === 0 || muebles.some((m) => m.tipo === id);
+
+app.get('/api/casa', async (req, res) => {
+  await base.sincronizarMonedas({ dibujo: G.dibujo, pareja: G.pareja });
+  const [monedas, movimientos, muebles, ajustes, avatares, terminaron, pospuestos] = await Promise.all([
+    base.saldo(), base.movimientos(15), base.muebles(), base.ajustesCasa(), base.versionesDeAvatares(),
+    base.terminaronEl(req.hoy), base.pospuestosEntre(req.hoy, req.hoy),
+  ]);
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    monedas,
+    movimientos,
+    catalogo: CASA.CATALOGO,
+    lado: CASA.LADO,
+    ganancias: G,
+    muebles: muebles.filter((m) => !['pintura', 'piso'].includes(CASA.muebleDe(m.tipo)?.cat)),
+    tiene: CASA.CATALOGO.filter((m) => ['pintura', 'piso'].includes(m.cat) && tieneEl(muebles, m.id)).map((m) => m.id),
+    ajustes: { pintura: ajustes.pintura || CASA.POR_DEFECTO.pintura, piso: ajustes.piso || CASA.POR_DEFECTO.piso },
+    avatares: Object.fromEntries(IDS.map((q) => [q, avatares[q] || null])),
+    // Cómo anda cada quien hoy (los personajes lo muestran).
+    animo: Object.fromEntries(IDS.map((q) => [q, {
+      dibujo: terminaron.includes(q),
+      pospuso: (pospuestos.find((p) => p.quien === q) || {}).motivo || null,
+    }])),
+  });
+});
+
+app.post('/api/casa/comprar', async (req, res) => {
+  const m = CASA.muebleDe(req.body?.tipo);
+  if (!m) return res.status(400).json({ error: 'mueble_invalido' });
+  const deCuarto = m.cat === 'pintura' || m.cat === 'piso';
+  if (deCuarto && tieneEl(await base.muebles(), m.id)) return res.status(409).json({ error: 'ya_lo_tienen' });
+  const id = await base.comprar({ tipo: m.id, precio: m.precio, quien: req.yo });
+  if (id == null) return res.status(402).json({ error: 'sin_monedas', monedas: await base.saldo() });
+  if (deCuarto) await base.guardarAjuste(m.cat, m.id); // la pintura o el piso se estrenan de una
+  return res.json({ ok: true, id, monedas: await base.saldo() });
+});
+
+// Poner (o mover) un mueble: { id, x, z, rot } en el piso, o { id, x, pared } en la pared.
+app.post('/api/casa/poner', async (req, res) => {
+  const { id, x, z, rot, pared } = req.body || {};
+  const muebles = await base.muebles();
+  const mueble = muebles.find((m) => m.id === id);
+  if (!mueble) return res.status(404).json({ error: 'no_existe' });
+  const tipo = CASA.muebleDe(mueble.tipo);
+  const nuevo = tipo && tipo.cat === 'pared'
+    ? { id, tipo: mueble.tipo, x, z: 0, rot: 0, pared }
+    : { id, tipo: mueble.tipo, x, z, rot: rot || 0, pared: null };
+  const error = CASA.revisarLugar(nuevo, muebles);
+  if (error) return res.status(error === 'lugar_ocupado' ? 409 : 400).json({ error });
+  await base.moverMueble(nuevo);
+  return res.json({ ok: true });
+});
+
+app.post('/api/casa/guardar', async (req, res) => {
+  const mueble = await base.mueble(req.body?.id);
+  if (!mueble) return res.status(404).json({ error: 'no_existe' });
+  await base.moverMueble({ id: mueble.id, x: null, z: null, rot: 0, pared: null });
+  return res.json({ ok: true });
+});
+
+app.post('/api/casa/vender', async (req, res) => {
+  const mueble = await base.mueble(req.body?.id);
+  const tipo = mueble && CASA.muebleDe(mueble.tipo);
+  if (!mueble || !tipo || tipo.cat === 'pintura' || tipo.cat === 'piso') return res.status(404).json({ error: 'no_existe' });
+  await base.vender({ id: mueble.id, reembolso: Math.floor(tipo.precio / 2), quien: req.yo });
+  return res.json({ ok: true, monedas: await base.saldo() });
+});
+
+// Elegir la pintura o el piso (de los que ya tienen).
+app.post('/api/casa/cuarto', async (req, res) => {
+  const m = CASA.muebleDe(req.body?.tipo);
+  if (!m || (m.cat !== 'pintura' && m.cat !== 'piso')) return res.status(400).json({ error: 'invalido' });
+  if (!tieneEl(await base.muebles(), m.id)) return res.status(402).json({ error: 'no_lo_tienen' });
+  await base.guardarAjuste(m.cat, m.id);
+  return res.json({ ok: true });
+});
+
+// Qué dibujo se ve en un cuadro: { id, fecha, quien } (uno que yo pueda ver).
+app.post('/api/casa/cuadro', async (req, res) => {
+  const { id, fecha, quien } = req.body || {};
+  const mueble = await base.mueble(id);
+  if (!mueble || mueble.tipo !== 'cuadro') return res.status(404).json({ error: 'no_existe' });
+  if (!F.esFecha(fecha) || !porId.has(quien)) return res.status(400).json({ error: 'dibujo_invalido' });
+  const fila = await base.leerImagen({ fecha, quien, yo: req.yo, mini: true });
+  if (!fila || (quien !== req.yo && !fila.tengoMio && fecha >= req.hoy)) return res.status(400).json({ error: 'dibujo_invalido' });
+  await base.ponerDibujo(mueble.id, `${fecha}/${quien}`);
+  return res.json({ ok: true });
+});
+
+// ---- el personaje de cada quien (lo dibujan sobre un monito gordito)
+app.post('/api/avatar', async (req, res) => {
+  const buffer = leerDataUrl(req.body?.imagen, 'png|webp');
+  const imagen = buffer && await comprimirAvatar(buffer);
+  if (!imagen) return res.status(400).json({ error: 'imagen_invalida' });
+  const v = await base.guardarAvatar(req.yo, imagen);
+  await avisarA(parejaDe(req.yo), `${NOMBRES[req.yo]} se dibujó un personaje nuevo 🏠`, 'Entra a la casa para verlo caminar.', { tag: 'casa' });
+  return res.json({ ok: true, v });
+});
+
+app.get('/api/avatar/:quien', async (req, res) => {
+  if (!porId.has(req.params.quien)) return res.status(404).end();
+  const fila = await base.leerAvatar(req.params.quien);
+  if (!fila) return res.status(404).end();
+  res.set({ 'Content-Type': 'image/webp', 'Cache-Control': 'private, max-age=31536000, immutable' });
+  return res.send(fila.imagen);
+});
+
+// ---------------------------------------------------------------- pregunta del día
+app.get('/api/pregunta', async (req, res) => {
+  const otra = parejaDe(req.yo);
+  const desde = F.sumarDias(req.hoy, -30);
+  const respuestas = await base.respuestasEntre(F.anioDe(desde) === F.anioDe(req.hoy) ? desde : `${F.anioDe(req.hoy)}-01-01`, req.hoy);
+  const de = (fecha, quien) => (respuestas.find((r) => r.fecha === fecha && r.quien === quien) || {}).texto || null;
+  const dia = (fecha) => {
+    const mia = de(fecha, req.yo);
+    const suya = de(fecha, otra);
+    // La de mi pareja se ve cuando ya respondí la mía (o cuando ya pasó el día).
+    return { fecha, pregunta: preguntaDelDia(fecha), mia, suya: mia || fecha < req.hoy ? suya : null, parejaRespondio: Boolean(suya) };
+  };
+  const fechas = [...new Set(respuestas.map((r) => r.fecha))].filter((f) => f !== req.hoy).sort().reverse();
+  res.set('Cache-Control', 'no-store');
+  res.json({ hoy: dia(req.hoy), anteriores: fechas.map(dia), largo: LARGO_RESPUESTA });
+});
+
+app.post('/api/pregunta', async (req, res) => {
+  const texto = leerTexto(req.body?.texto, LARGO_RESPUESTA, { lineas: true });
+  if (!texto) return res.status(400).json({ error: 'texto_invalido' });
+  if (!(await base.guardarRespuesta({ fecha: req.hoy, quien: req.yo, texto }))) return res.status(409).json({ error: 'ya_respondiste' });
+  const ganadas = await base.sumarMonedas([{ clave: `pregunta:${req.hoy}:${req.yo}`, quien: req.yo, cantidad: G.pregunta, motivo: 'pregunta' }]);
+  const otra = parejaDe(req.yo);
+  const yaRespondio = (await base.respuestasEntre(req.hoy, req.hoy)).some((r) => r.quien === otra);
+  await avisarA(otra, `${NOMBRES[req.yo]} respondió la pregunta del día 💭`, yaRespondio ? 'Ya pueden ver lo que respondió cada quien.' : `«${preguntaDelDia(req.hoy)}» Responde para ver su respuesta.`, { tag: 'pregunta' });
+  return res.json({ ok: true, monedas: ganadas });
+});
+
+// ---------------------------------------------------------------- cartitas
+// Lo que se ve de una carta: el texto solo si ya se abrió, o si la escribí yo.
+function verCarta(c, yo) {
+  const cuando = CARTAS.cuandoDe(c.cuando);
+  return {
+    id: c.id, de: c.de, para: c.para, cuando: c.cuando, cuandoTexto: cuando ? cuando.texto : c.cuando, emoji: cuando ? cuando.emoji : '💌',
+    fecha: c.fecha, color: c.color, creado: c.creado, abierta: c.abierta,
+    texto: c.de === yo || c.abierta ? c.texto : null,
+  };
+}
+
+app.get('/api/cartas', async (req, res) => {
+  const todas = await base.cartasDe(req.yo);
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    recibidas: todas.filter((c) => c.para === req.yo).map((c) => verCarta(c, req.yo)),
+    enviadas: todas.filter((c) => c.de === req.yo).map((c) => verCarta(c, req.yo)),
+    cuando: CARTAS.CUANDO,
+    colores: CARTAS.COLORES_SOBRE,
+    largo: CARTAS.LARGO_CARTA,
+    hoy: req.hoy,
+  });
+});
+
+app.post('/api/cartas', async (req, res) => {
+  const { cuando, fecha, color } = req.body || {};
+  const tipo = CARTAS.cuandoDe(cuando);
+  if (!tipo) return res.status(400).json({ error: 'cuando_invalido' });
+  if (tipo.id === 'fecha' && (!F.esFecha(fecha) || fecha <= req.hoy || fecha > F.sumarDias(req.hoy, 3 * 366))) return res.status(400).json({ error: 'fecha_invalida' });
+  if (!CARTAS.COLORES_SOBRE.includes(color)) return res.status(400).json({ error: 'color_invalido' });
+  const texto = leerTexto(req.body.texto, CARTAS.LARGO_CARTA, { lineas: true });
+  if (!texto) return res.status(400).json({ error: 'texto_invalido' });
+  const id = await base.crearCarta({ de: req.yo, para: parejaDe(req.yo), cuando: tipo.id, fecha: tipo.id === 'fecha' ? fecha : null, texto, color });
+  const ganadas = await base.sumarMonedas([{ clave: `carta:${req.hoy}:${req.yo}`, quien: req.yo, cantidad: G.carta, motivo: 'carta' }]);
+  const cuandoTexto = tipo.id === 'fecha' ? `llegue el ${F.fechaCorta(fecha)}` : tipo.texto;
+  await avisarA(parejaDe(req.yo), `${NOMBRES[req.yo]} te escribió una cartita 💌`, `«Ábrela cuando ${cuandoTexto}»`, { tag: 'carta', ttl: 24 * HORAS });
+  return res.json({ ok: true, id, monedas: ganadas });
+});
+
+app.post('/api/cartas/:id/abrir', async (req, res) => {
+  const carta = await base.carta(Number(req.params.id));
+  if (!carta || carta.para !== req.yo) return res.status(404).json({ error: 'no_existe' });
+  if (carta.cuando === 'fecha' && carta.fecha > req.hoy) return res.status(403).json({ error: 'todavia_no', fecha: carta.fecha });
+  if (await base.abrirCarta(carta.id)) {
+    const cuando = CARTAS.cuandoDe(carta.cuando);
+    await avisarA(carta.de, `${NOMBRES[req.yo]} abrió tu cartita 🥹`, `«Ábrela cuando ${carta.cuando === 'fecha' ? `llegue el ${F.fechaCorta(carta.fecha)}` : cuando.texto}»`, { tag: 'carta' });
+  }
+  return res.json({ ok: true, carta: verCarta(await base.carta(carta.id), req.yo) });
 });
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'no_existe' }));
