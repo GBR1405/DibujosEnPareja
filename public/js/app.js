@@ -15,6 +15,7 @@ import { hojaPosponer, tarjetaPospuesto, tarjetaPendiente, explicarPorQueNo, man
 import { tarjetaReto, pantallaReto, modoReto } from './reto.js';
 import { tarjetaPregunta, pantallaNosotros } from './nosotros.js';
 import { mostrarNovedades } from './novedades.js';
+import { instalarGrieta } from './galaxia/grieta.js';
 
 const raiz = document.getElementById('app');
 let sesion = null; // { yo, pareja }
@@ -464,7 +465,9 @@ async function pantallaHoy(cont, vigente) {
   }, 12000);
   const alVolver = () => { if (!document.hidden) { refrescar(); avisos.actualizar(); } };
   document.addEventListener('visibilitychange', alVolver);
-  return () => { clearInterval(cada); document.removeEventListener('visibilitychange', alVolver); };
+  // El secreto: al final de la página, si sigues jalando hacia arriba hasta que se rompa… (galaxia/grieta.js)
+  const soltarGrieta = instalarGrieta({ pantalla, alRomper: () => navegar('galaxia') });
+  return () => { clearInterval(cada); document.removeEventListener('visibilitychange', alVolver); soltarGrieta(); };
 }
 
 // ================================================================== dibujar
@@ -771,7 +774,8 @@ const AVISO_ACTUALIZADA = 'garabatos-actualizada';
 let versionCargada = null;
 let hayVersionNueva = false;
 let ultimaRevision = 0;
-const dibujandoAhora = () => /^#\/(dibujar|reto\/dibujar|casa\/personaje)/.test(location.hash);
+// (En la galaxia tampoco: es un momento tranquilo, que no se interrumpa.)
+const dibujandoAhora = () => /^#\/(dibujar|reto\/dibujar|casa\/personaje|galaxia)/.test(location.hash);
 
 function recargarSiToca() {
   if (!hayVersionNueva || dibujandoAhora()) return false;
@@ -799,7 +803,7 @@ try {
 } catch { /* sin almacenamiento */ }
 
 // ================================================================== router
-// #/hoy · #/dibujar[/fecha] · #/calendario · #/reto[/dibujar] · #/casa[/personaje] · #/nosotros
+// #/hoy · #/dibujar[/fecha] · #/calendario · #/reto[/dibujar] · #/casa[/personaje] · #/nosotros · #/galaxia
 const PANTALLAS = {
   hoy: pantallaHoy,
   calendario: pantallaCalendario,
@@ -824,6 +828,12 @@ const PANTALLAS = {
     if (!modo || !vigente()) return undefined;
     return pantallaLienzo(cont, vigente, modo);
   },
+  // La galaxia secreta (galaxia/galaxia.js), también con Three.js.
+  async galaxia(cont, vigente) {
+    const galaxia = await import('./galaxia/galaxia.js');
+    if (!vigente()) return undefined;
+    return galaxia.pantallaGalaxia(cont, vigente);
+  },
 };
 
 async function ir() {
@@ -837,8 +847,10 @@ async function ir() {
   if (!vigente()) return;
 
   raiz.replaceChildren();
+  raiz.style.visibility = ''; // (la grieta la esconde al romperse)
   document.body.classList.remove('modo-dibujo');
   const [ruta, parametro] = (location.hash.replace(/^#\//, '') || 'hoy').split('/');
+  if (ruta !== 'galaxia') document.body.classList.remove('en-galaxia');
 
   try {
     if (!sesion) {

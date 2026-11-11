@@ -2205,6 +2205,41 @@ body.modo-dibujo .efecto-racha { display: none; }
 }
 @keyframes nubecita { 0% { opacity: 0; transform: scale(.3); } 25% { opacity: .9; } 100% { opacity: 0; transform: scale(1.3) translateY(-10px); } }
 
+/* ---------------------------------------------------------------- la grieta (el secreto de Hoy)
+   Al jalar la pantalla hacia abajo se agrieta (un <canvas> encima de todo); si se rompe,
+   cada pedazo es una copia de la pantalla recortada (public/js/galaxia/grieta.js). El
+   resto de los estilos de la galaxia está en galaxia.css. */
+.grieta-lienzo { position: fixed; inset: 0; z-index: 30; width: 100%; height: 100%; pointer-events: none; }
+body.jalando-grieta, body.jalando-grieta * { -webkit-user-select: none; user-select: none; cursor: grabbing; }
+html.grieta-activa, html.grieta-activa body { overflow-x: hidden; }
+.esquirlas { position: fixed; inset: 0; z-index: 90; overflow: hidden; pointer-events: none; perspective: 900px; }
+.esquirla { position: absolute; overflow: hidden; will-change: transform, opacity; }
+.esquirla-pagina { position: absolute; overflow: hidden; transform: translate(0, 0); }
+.esquirla-pagina * { animation: none !important; transition: none !important; }
+.esquirla-tinte { position: absolute; inset: 0; }
+.esquirla.polvo { background: linear-gradient(140deg, rgba(236, 243, 255, .95), rgba(150, 170, 255, .65) 60%, rgba(190, 150, 255, .7)); }
+.esquirla-brillo {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(var(--ang, 120deg), transparent 30%, rgba(225, 236, 255, .85) 50%, transparent 70%);
+  mix-blend-mode: screen;
+}
+.esquirla-borde { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
+.confeti-lienzo { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.grieta-destello {
+  position: fixed;
+  z-index: 96;
+  width: 140px;
+  height: 140px;
+  margin: -70px 0 0 -70px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, rgba(205, 222, 255, .95) 18%, rgba(120, 140, 255, .55) 42%, rgba(150, 110, 255, .2) 60%, transparent 72%);
+  pointer-events: none;
+}
+body.en-galaxia { background: #050816; }
+body.en-galaxia::before, body.en-galaxia .efecto-racha { display: none; }
+
 /* ---------------------------------------------------------------- menos movimiento */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

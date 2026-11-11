@@ -358,6 +358,23 @@ export function crearEscena(contenedor, { lado, catalogo, pisos: pisosIniciales 
     }
     const pos = p.muneco.raiz.position;
     let desde = casillaDe(pos);
+    // En medio de la escalera: primero termina de subir (o de bajar) y de ahí sigue. Antes
+    // saltaba a la casilla libre más cercana, y parecía que se teletransportaba.
+    if (esc && pisos >= 2 && (enEscalera(desde.x, desde.z) || (pos.y > 0.05 && pos.y < ALTO_PISO - 0.05))) {
+      const sube = pos.y >= ALTO_PISO / 2;
+      const punta = sube
+        ? { x: esc.x + 0.5, y: ALTO_PISO, z: esc.desde + 0.02, p: 1, escalera: true }
+        : { x: esc.x + 0.5, y: 0, z: esc.hasta + 1 - 0.02, p: 0, escalera: true };
+      const rellano = sube ? { p: 1, x: esc.arriba[0], z: esc.arriba[1] } : { p: 0, x: esc.abajo[0], z: esc.abajo[1] };
+      const resto = buscarCamino(rellano, destino);
+      if (!resto) return false;
+      p.camino = resto;
+      p.puntos = [punta, ...puntosDel([rellano, ...resto], null)];
+      p.alLlegar = alLlegar;
+      p.estado = 'caminando';
+      p.desde = { x: pos.x, y: pos.y, z: pos.z, escalera: true };
+      return true;
+    }
     if (!libre(desde.p, desde.x, desde.z)) {
       // quedó encima de un mueble: sale de un saltito a la casilla libre más cercana
       const libres = casillasLibres(desde.p).sort((a, b) => Math.hypot(a.x - desde.x, a.z - desde.z) - Math.hypot(b.x - desde.x, b.z - desde.z));
@@ -367,7 +384,8 @@ export function crearEscena(contenedor, { lado, catalogo, pisos: pisosIniciales 
       return true;
     }
     if (desde.p === destino.p && desde.x === destino.x && desde.z === destino.z) {
-      // ya está ahí: un pasito al centro
+      // ya está ahí: un pasito al centro (y se olvida el camino de antes)
+      p.camino = [destino];
       p.puntos = [{ ...centroDe(destino), p: destino.p }];
     } else {
       const camino = buscarCamino(desde, destino);
@@ -563,12 +581,22 @@ export function crearEscena(contenedor, { lado, catalogo, pisos: pisosIniciales 
   }
 
   // ---- abrazarse
+  // ¿Está en la escalera (o a media altura entre los pisos)?
+  const enLaEscalera = (p) => {
+    const pos = p.muneco.raiz.position;
+    const c = casillaDe(pos);
+    return enEscalera(c.x, c.z) || (pos.y > 0.05 && Math.abs(pos.y - ALTO_PISO) > 0.05);
+  };
+
   function abrazar(a, b) {
-    if (!b || ocupado(b) || ocupado(a)) { a.estado = 'pensando'; a.espera = 1; return; }
-    if (b.estado === 'caminando') { b.puntos = []; b.alLlegar = null; }
+    const nada = () => { a.estado = 'pensando'; a.espera = 1; };
+    if (!b || ocupado(b) || ocupado(a)) { nada(); return; }
     const pa = a.muneco.raiz.position.clone();
     const pb = b.muneco.raiz.position.clone();
-    if (Math.abs(pa.y - pb.y) > 1) { a.estado = 'pensando'; a.espera = 1; return; }
+    // Solo si están en el mismo piso y cerquita: si el otro ya se fue lejos (o está en la
+    // escalera), no hay abrazo (antes se "teletransportaban" para juntarse).
+    if (Math.abs(pa.y - pb.y) > 0.3 || enLaEscalera(a) || enLaEscalera(b) || Math.hypot(pa.x - pb.x, pa.z - pb.z) > 1.7) { nada(); return; }
+    if (b.estado === 'caminando') { b.puntos = []; b.alLlegar = null; b.camino = null; }
     const medio = pa.clone().add(pb).multiplyScalar(0.5);
     for (const [x, desde, otro] of [[a, pa, pb], [b, pb, pa]]) {
       x.estado = 'abrazo';
@@ -624,11 +652,14 @@ export function crearEscena(contenedor, { lado, catalogo, pisos: pisosIniciales 
       const lugar = casillaParaUsar(cama.dato);
       if (lugar && caminarA(p, lugar, () => usar(p, cama, lugar, { dura: entre([40, 80]) }))) return;
     }
-    // ir a darle un abrazo
-    if (otro && !ocupado(otro) && r < 0.14) {
+    // ir a darle un abrazo (si el otro está tranquilo, lo espera)
+    if (otro && !ocupado(otro) && !enLaEscalera(otro) && otro.estado !== 'caminando' && r < 0.14) {
       const c = casillaDe(otro.muneco.raiz.position);
       const al = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => ({ p: c.p, x: c.x + dx, z: c.z + dz })).filter((n) => libre(n.p, n.x, n.z));
-      if (al.length && caminarA(p, azar(al), () => abrazar(p, otro))) return;
+      if (al.length && caminarA(p, azar(al), () => abrazar(p, otro))) {
+        otro.espera = Math.max(otro.espera || 0, 6);
+        return;
+      }
     }
     // una cita en el sofá
     if (otro && !ocupado(otro) && otro.estado !== 'caminando' && r < 0.22) {

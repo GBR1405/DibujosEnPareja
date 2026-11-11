@@ -1,0 +1,19 @@
+La galaxia secreta: los archivos que van aquí
+=============================================
+
+Pon estos archivos en esta carpeta (public/galaxia/) con estos nombres exactos:
+
+  musica.mp3     La música de fondo de la galaxia (suena en bucle, entra y sale suavecito).
+                 Mientras no esté, suenan campanitas de viento hechas por la app.
+
+  ruptura.mp3    El sonido de la pantalla rompiéndose (al entrar a la galaxia).
+                 Mientras no esté, la app arma uno con vidrio y campanitas.
+
+  stickers/sticker-1.png … stickers/sticker-30.png
+                 Los 30 stickers del álbum (uno por cada estrella dorada atrapada).
+                 Mejor en PNG con fondo transparente y cuadrados (por ejemplo 400 x 400):
+                 la app les pone el borde blanco de sticker y la sombrita.
+                 Mientras falte alguno, se dibuja uno provisional con su número.
+
+Consejos: que la música pese poco (un MP3 de 128 kbps está perfecto) y que los stickers
+no pasen de unos 200 KB cada uno, así carga rápido en el teléfono.

@@ -389,7 +389,7 @@ function servidorAparte(env) {
     server.radio.usarBuscador(async () => { throw new Error('Radio Browser caído'); });
     const sinApi = (await pedir('GET', '/api/radio', { cookie: A.cookie })).datos.estilos;
     assert.deepEqual(sinApi.find((e) => e.id === 'lofi').emisoras.map((x) => x.url), ESTILOS.find((e) => e.id === 'lofi').emisoras.map(([, , url]) => url)); paso('si Radio Browser no responde, suenan las emisoras guardadas');
-    assert.match((await pedir('GET', '/api/radio', { cookie: A.cookie })).cabeceras.get('content-security-policy'), /media-src https:/); paso("la CSP deja sonar audio de las emisoras (media-src https:) y nada más cambia");
+    assert.match((await pedir('GET', '/api/radio', { cookie: A.cookie })).cabeceras.get('content-security-policy'), /media-src 'self' https:/); paso("la CSP deja sonar audio de las emisoras (https) y la música de la galaxia ('self')");
 
     console.log('Comodines');
     const { saldo, siguienteMes } = require('../lib/comodines');
@@ -715,6 +715,11 @@ function servidorAparte(env) {
     if (rA.tipo === 'tema') {
       const manana = F.sumarDias(hoy, 1);
       assert.deepEqual((await base.temasElegidosEntre(manana, manana)).map((t) => t.tema), ['un pingüino astronauta']); paso('el tema elegido queda para mañana');
+    } else if (rA.tipo === 'adivina') {
+      // Elegir la palabra todavía no le toca a la pareja: primero hay que dibujarla.
+      assert.ok(!intentos.some((i) => i.titulo.startsWith('¡Te toca en el reto!')));
+      assert.equal((await pedir('POST', '/api/reto/dibujo', { cookie: yoEmpiezo.cookie, cuerpo: { imagen: png } })).estado, 200);
+      assert.ok(intentos.some((i) => i.titulo.startsWith('¡Te toca en el reto!'))); paso('al dibujar la palabra secreta, a la pareja le avisa que le toca adivinar');
     } else if (rA.tipo !== 'colores') {
       assert.ok(intentos.some((i) => i.titulo.startsWith('¡Te toca en el reto!'))); paso('a la pareja le avisa que le toca');
     }
@@ -756,6 +761,54 @@ function servidorAparte(env) {
     const abierta = await pedir('POST', `/api/cartas/${carta.datos.id}/abrir`, { cookie: B.cookie });
     assert.equal(abierta.datos.carta.texto, 'Eres lo más bonito\nque tengo 💛');
     assert.ok(intentos.some((i) => i.titulo === `${eli} abrió tu cartita 🥹`)); paso('se abre cuando la necesites (la de fecha, no antes) y a quien la escribió le avisa');
+
+    console.log('Galaxia');
+    let gA = (await pedir('GET', '/api/galaxia', { cookie: A.cookie })).datos;
+    let gB = (await pedir('GET', '/api/galaxia', { cookie: B.cookie })).datos;
+    assert.deepEqual([gA.paraMi, gB.paraMi, gB.estrella.atrapada, gB.stickers.length, gB.totalStickers], [false, true, false, 0, 30]); paso('la galaxia es de Eli, pero Gabri también la puede abrir');
+    const atrapar = (cookie) => pedir('POST', '/api/galaxia/estrella', { cookie });
+    const e1 = await atrapar(B.cookie);
+    assert.deepEqual([e1.estado, e1.datos.sticker], [200, 1]);
+    const e2 = await atrapar(B.cookie);
+    assert.deepEqual([e2.estado, e2.datos.error, e2.datos.sticker], [409, 'ya_atrapada', 1]); paso('la estrella del día se atrapa una sola vez y pega el sticker 1');
+    // días anteriores: ya atrapó 29 más → el álbum se llena, y la de "mañana" ya no da sticker
+    for (let i = 1; i <= 29; i += 1) await base.atraparEstrella({ fecha: F.sumarDias(hoy, -i), quien: 'dos', sticker: i + 1 });
+    gB = (await pedir('GET', '/api/galaxia', { cookie: B.cookie })).datos;
+    assert.deepEqual([gB.stickers.length, gB.estrella.sticker, gB.estrellasAtrapadas], [30, 1, 30]);
+    assert.equal((await atrapar(A.cookie)).datos.sticker, 1); paso('cada quien tiene su álbum (30 stickers, uno por día)');
+    const fotoPrueba = `data:image/jpeg;base64,${(await sharp({ create: { width: 900, height: 600, channels: 3, background: { r: 255, g: 180, b: 200 } } }).jpeg().toBuffer()).toString('base64')}`;
+    const crearRecuerdo = (cookie, cuerpo) => pedir('POST', '/api/galaxia/recuerdos', { cookie, cuerpo });
+    assert.equal((await crearRecuerdo(A.cookie, { titulo: '  ' })).estado, 400);
+    assert.equal((await crearRecuerdo(A.cookie, { titulo: 'Futuro', fecha: F.sumarDias(hoy, 3) })).estado, 400);
+    assert.equal((await crearRecuerdo(A.cookie, { titulo: 'Mala foto', foto: 'data:image/png;base64,AAAA' })).estado, 400);
+    intentos.length = 0;
+    const recDia = await crearRecuerdo(A.cookie, { titulo: 'El día que nos conocimos', fecha: '2026-02-14', texto: 'Llovía\ny tú reías 💛', foto: fotoPrueba });
+    assert.equal(recDia.estado, 200);
+    assert.equal(intentos.length, 0); paso('guardar un recuerdo no le avisa a Eli si todavía no encontró la galaxia (no se arruina la sorpresa)');
+    await pedir('POST', '/api/galaxia/dato', { cookie: B.cookie, cuerpo: { clave: 'intro', valor: true } });
+    await crearRecuerdo(A.cookie, { titulo: 'Nuestra primera cita' });
+    assert.ok(intentos.some((i) => i.titulo === `${gabri} guardó un recuerdo nuevo entre las estrellas 🌌`)); paso('cuando ya la encontró, sí le avisa');
+    gB = (await pedir('GET', '/api/galaxia', { cookie: B.cookie })).datos;
+    const delDia = gB.recuerdos.find((r) => r.titulo === 'El día que nos conocimos');
+    assert.deepEqual([delDia.fecha, delDia.texto, Boolean(delDia.foto)], ['2026-02-14', 'Llovía\ny tú reías 💛', true]);
+    const foto = await pedir('GET', `/api/galaxia/recuerdos/${delDia.id}/foto`, { cookie: B.cookie });
+    const metaFoto = await sharp(foto.datos).metadata();
+    assert.deepEqual([metaFoto.format, metaFoto.width, metaFoto.height], ['webp', 900, 600]);
+    const miniRec = await sharp((await pedir('GET', `/api/galaxia/recuerdos/${delDia.id}/foto?mini=1`, { cookie: B.cookie })).datos).metadata();
+    assert.deepEqual([miniRec.width, miniRec.height], [360, 360]); paso('los recuerdos guardan su foto (WebP) y una miniatura cuadrada');
+    assert.equal((await pedir('DELETE', `/api/galaxia/recuerdos/${delDia.id}`, { cookie: B.cookie })).estado, 404);
+    assert.equal((await pedir('DELETE', `/api/galaxia/recuerdos/${delDia.id}`, { cookie: A.cookie })).estado, 200); paso('solo quien escribió un recuerdo lo puede borrar');
+    assert.equal((await pedir('POST', '/api/galaxia/frases', { cookie: A.cookie, cuerpo: { texto: '' } })).estado, 400);
+    await pedir('POST', '/api/galaxia/frases', { cookie: A.cookie, cuerpo: { texto: 'Tus dibujos me hacen feliz 💛' } });
+    gA = (await pedir('GET', '/api/galaxia', { cookie: A.cookie })).datos;
+    gB = (await pedir('GET', '/api/galaxia', { cookie: B.cookie })).datos;
+    assert.deepEqual([gB.frases.paraMi.map((f) => f.texto), gA.frases.mias.map((f) => f.texto), gA.frases.paraMi.length], [['Tus dibujos me hacen feliz 💛'], ['Tus dibujos me hacen feliz 💛'], 0]); paso('las frases que escribe Gabri caen en el frasco de Eli');
+    const dato = (cuerpo) => pedir('POST', '/api/galaxia/dato', { cookie: B.cookie, cuerpo });
+    assert.equal((await dato({ clave: 'constelaciones', valor: ['corazon', 'gatito'] })).estado, 200);
+    assert.equal((await dato({ clave: 'saltitos', valor: { mejor: 12, estrellas: 40 } })).estado, 200);
+    assert.equal((await dato({ clave: 'hackeo', valor: 1 })).estado, 400);
+    assert.equal((await dato({ clave: 'constelaciones', valor: ['<script>'] })).estado, 400);
+    assert.deepEqual((await pedir('GET', '/api/galaxia', { cookie: B.cookie })).datos.datos, { intro: true, constelaciones: ['corazon', 'gatito'], saltitos: { mejor: 12, estrellas: 40 } }); paso('la galaxia recuerda lo de los juegos (solo lo que debe)');
 
     console.log('Novedades');
     assert.equal((await pedir('GET', '/api/yo', { cookie: A.cookie })).datos.novedades, null);

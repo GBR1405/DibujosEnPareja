@@ -142,6 +142,31 @@ En el historial de cada ejecución (**History** *(sin verificar)*) verás la res
 
 Ojo: si pruebas con **Test run** a media mañana, ese día ya cuenta como "enviado" y el de las 12:00 no saldrá. `enviados` cuenta aparatos, no personas (si alguien tiene teléfono y iPad, son 2).
 
+## La galaxia secreta 🌌 (para Eli)
+
+Es un secreto: en la app no hay ninguna pista (cuéntaselo tú, o deja que lo descubra).
+
+**Cómo se entra:** en **Hoy**, baja hasta el final de la página (más abajo del dibujo del día) y sigue jalando hacia arriba sin soltar, con fuerza: tiene bastante resistencia. Se va agrietando desde abajo con grietas de luz azul de galaxia (si sueltas, el vidrio se cura solito). Si jalas hasta el máximo, las grietas suben de golpe y la pantalla se desmorona desde abajo (con la barra y todo); detrás aparece la galaxia. En la computadora se puede arrastrar con el mouse. También se entra directo con la dirección `#/galaxia`.
+
+- **La primera vez:** un mensaje en el cielo oscuro, frase por frase, que termina en *"Por eso te creé este lugar ✨ — Gabri 💛"*. Después la galaxia aparece volando, empieza la música y Estelita (una estrellita) cuenta qué hay. Todos los textos están en `public/js/galaxia/textos.js` (`INICIO`, la bienvenida, lo que dicen las estrellitas, las 42 frases del frasco y las constelaciones): cámbialos a tu gusto.
+- **El cielo** es 3D (Three.js con brillo suave): los planetas son el menú; las estrellitas amigas dicen algo si las tocas; las fotos de los recuerdos flotan como burbujas (tócalas para abrirlas); las constelaciones que completas se quedan en el cielo; y tocar el cielo hace chispitas con una campanita.
+- 📖 **Nuestra historia:** los recuerdos de los dos, como un cuento ("Había una vez…"): título, fecha, texto y foto (opcional). La foto se achica en el teléfono y el servidor la guarda en WebP. Al abrir un recuerdo, la foto se revela como una instantánea, con grano de película, luz cálida y la fecha naranja de las cámaras viejitas. Cualquiera de los dos guarda recuerdos; solo quien lo guardó lo puede borrar.
+- 🫙 **Frasco de estrellitas:** para cuando Eli dude de su arte. Lo toca y sale una estrellita que se desdobla en una notita: primero las nuevas que le escribiste tú (desde tu propio frasco: *Escribirle una estrellita a Eli*), y si no, las 42 que ya trae, firmadas por ti. Las que más le gusten las guarda en favoritas ♥.
+- ✨ **Constelaciones:** 12 figuras de puntitos que no se sabe qué son hasta unirlas (con melodía de cajita de música). Al terminar se revela el dibujo con una frase, y queda brillando en el cielo.
+- 🪐 **Saltitos estelares:** su animalito salta de planeta en planeta despertándolos (3 corazones; una estrellita lo rescata si cae). Se guarda el récord.
+- ⭐ **Álbum de stickers:** cada día cruza el cielo una estrella dorada (con carita); si la atrapas, se pega el sticker que sigue: 30 en total, uno por día. Cada cuenta tiene su propio álbum.
+- **Avisos:** si guardas un recuerdo o le metes una estrellita al frasco, a la otra persona le llega un aviso, pero solo cuando ya descubrió la galaxia (para no arruinar la sorpresa).
+- Es de los dos, pero está hecha para la cuenta de `galaxia.para` en `config.js` (`'dos'`, Eli): a ella le habla como dueña. Tú puedes entrar igual para probarla (te sale "así lo va a ver Eli").
+- **Sonido:** en iPhone el audio solo se despierta dentro de la galaxia (así no corta la música de otras apps mientras dibujan). La música suena aunque el teléfono esté en silencio, como en cualquier app de música; el botón 🔊 de arriba la silencia (se recuerda).
+
+**Los archivos que pones tú** van en `public/galaxia/` (ahí hay un `LEEME.txt`):
+
+- `musica.mp3`: la música de fondo (suena en bucle; un MP3 de 128 kbps está perfecto).
+- `ruptura.mp3`: el sonido de la pantalla rompiéndose.
+- `stickers/sticker-1.png` … `stickers/sticker-30.png`: los stickers del álbum (PNG con fondo transparente, cuadrados; la app les pone el borde blanco de sticker).
+
+Mientras falte alguno, la app se las arregla sola: campanitas de viento en vez de música, un vidrio rompiéndose hecho con sonidos y stickers provisionales con su número.
+
 ## Cómo se guarda
 
 Los dibujos van en una sola tabla:
@@ -206,6 +231,8 @@ CREATE TABLE recordatorios (fecha TEXT PRIMARY KEY);  -- días en que ya salió 
 ```
 
 Y para lo nuevo (también se crean solas): `pospuestos` (motivo, de 1 a 10 y por qué), `animos`, `temas_elegidos`, `retos` (lo que cada quien hizo en el reto de la semana, en JSON) y `retos_imagenes`, `monedas` (la alcancía: cada ganancia o gasto con una clave única, así nada se cuenta dos veces; el saldo es la suma), `muebles`, `casa_ajustes` (pintura, piso y si ya se vio la cartita de novedades), `avatares` (el personaje de cada quien, WebP con transparencia), `respuestas` (pregunta del día) y `cartas`. En año nuevo se borran los pospuestos y los retos del año anterior; la casa, las monedas, las respuestas y las cartitas se quedan.
+
+Para la galaxia (también se crean solas): `recuerdos` (título, texto, fecha y la foto en WebP con su miniatura), `frases` (las estrellitas del frasco: de quién, para quién y el texto), `estrellas` (la estrella dorada que atrapó cada quien cada día y el número de sticker que le tocó) y `galaxia_datos` (lo que se recuerda de cada quien: si ya vio el mensaje de inicio, las constelaciones completadas, el récord de saltitos y las frases favoritas). En año nuevo no se borran.
 
 - Cada persona puede tener varios aparatos (hasta 10; los más viejos se borran solos). Si un aparato entra con la otra cuenta, pasa a esa cuenta.
 - Si Apple o Google responden que un aparato ya no existe (desinstalaron la app, quitaron el permiso), se borra de la tabla.
@@ -272,9 +299,14 @@ public/js/racha.js   el fondo de la racha · public/js/posponer.js: posponer
 public/js/reto.js    el reto de la semana · public/js/nosotros.js: pregunta y cartitas
 public/js/casa/      la casa en 3D: escena, muebles, personajes y la plantilla del monito
 public/js/novedades.js la cartita de novedades · public/js/nube.js: el perrito nube
-public/vendor/       Three.js y perfect-freehand, ya empaquetados (npm run vendor)
+lib/galaxia.js       la galaxia secreta: cuántos stickers, largos de texto y qué datos se guardan
+public/js/galaxia/   la galaxia: grieta (la entrada), cielo (3D), inicio (el mensaje), recuerdos, frasco,
+                     constelaciones, saltitos, album, sonido, textos y marco (paneles y Estelita)
+public/galaxia.css   los estilos de la galaxia (se bajan solo al entrar)
+public/galaxia/      la música, el sonido de la ruptura y los stickers (los pones tú)
+public/vendor/       Three.js, perfect-freehand, GSAP, d3-delaunay y canvas-confetti, ya empaquetados (npm run vendor)
 ```
 
-`public/vendor/` se genera con `npm run vendor` (esbuild): Three.js solo con las piezas que usa la casa (~150 KB comprimido, y se baja solo al entrar a la casa) y perfect-freehand para el pincel de tinta. Ya está en el repositorio: Vercel no tiene que construir nada.
+`public/vendor/` se genera con `npm run vendor` (esbuild): Three.js solo con las piezas que usan la casa y la galaxia, más el brillo (*bloom*) de la galaxia (se baja solo al entrar a una de las dos), perfect-freehand para el pincel de tinta, y para la galaxia GSAP (animaciones), d3-delaunay (las grietas y los pedazos de vidrio) y canvas-confetti. Ya está en el repositorio: Vercel no tiene que construir nada.
 
-Las tipografías (Bagel Fat One y Mali, licencia SIL OFL) vienen incluidas en `public/fonts`. Los únicos servicios externos son los de avisos (Apple, Google o Mozilla, según el aparato; sin Firebase ni cuentas extra), cron-job.org para el recordatorio y, para la radio, Radio Browser y las propias emisoras. La app funciona sin ellos.
+Las tipografías (Bagel Fat One, Mali y Caveat, la letra a mano de la galaxia; licencia SIL OFL) vienen incluidas en `public/fonts`. Los únicos servicios externos son los de avisos (Apple, Google o Mozilla, según el aparato; sin Firebase ni cuentas extra), cron-job.org para el recordatorio y, para la radio, Radio Browser y las propias emisoras. La app funciona sin ellos.

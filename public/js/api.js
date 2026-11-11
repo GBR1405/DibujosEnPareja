@@ -55,7 +55,17 @@ export const api = {
   escribirCarta: (cuerpo) => pedir('POST', '/api/cartas', cuerpo),
   abrirCarta: (id) => pedir('POST', `/api/cartas/${id}/abrir`, {}),
   novedadesVistas: () => pedir('POST', '/api/novedades/visto', {}),
+  // la galaxia secreta
+  galaxia: () => pedir('GET', '/api/galaxia'),
+  atraparEstrella: () => pedir('POST', '/api/galaxia/estrella', {}),
+  guardarRecuerdo: (cuerpo) => pedir('POST', '/api/galaxia/recuerdos', cuerpo),
+  borrarRecuerdo: (id) => pedir('DELETE', `/api/galaxia/recuerdos/${id}`),
+  guardarFrase: (texto) => pedir('POST', '/api/galaxia/frases', { texto }),
+  borrarFrase: (id) => pedir('DELETE', `/api/galaxia/frases/${id}`),
+  datoGalaxia: (clave, valor) => pedir('POST', '/api/galaxia/dato', { clave, valor }),
 };
+
+export const urlRecuerdo = (id, v, mini = false) => `/api/galaxia/recuerdos/${id}/foto?v=${encodeURIComponent(v)}${mini ? '&mini=1' : ''}`;
 
 export const urlReto = (semana, clave, v) => `/api/reto/imagen/${semana}/${clave}?v=${encodeURIComponent(v)}`;
 export const urlAvatar = (quien, v) => `/api/avatar/${quien}?v=${encodeURIComponent(v)}`;

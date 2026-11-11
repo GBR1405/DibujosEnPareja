@@ -4,3 +4,4 @@ data/
 .vercel/
 *.tmp
 .DS_Store
+.playwright-mcp/

@@ -5,7 +5,7 @@ const express = require('express');
 
 const config = require('./config');
 const { abrir } = require('./lib/base');
-const { comprimir, comprimirAvatar } = require('./lib/imagen');
+const { comprimir, comprimirAvatar, comprimirFoto } = require('./lib/imagen');
 const { temaDelDia } = require('./lib/tema-del-dia');
 const { crearAvisos } = require('./lib/avisos');
 const { REACCIONES, reaccionPorId, LARGO_COMENTARIO } = require('./lib/reacciones');
@@ -17,6 +17,7 @@ const JUEGO = require('./lib/reto-juego');
 const CASA = require('./lib/casa');
 const { preguntaDelDia, LARGO_RESPUESTA } = require('./lib/preguntas');
 const CARTAS = require('./lib/cartas');
+const GALAXIA = require('./lib/galaxia');
 const F = require('./lib/fecha');
 
 // ---------------------------------------------------------------- arranque
@@ -231,8 +232,9 @@ app.use((req, res, next) => {
       "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
       + "script-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; frame-ancestors 'none'; "
       // La radio: el audio viene directo de cada emisora (cualquier https). Solo afecta a
-      // <audio>, que no puede ejecutar código.
-      + 'media-src https:',
+      // <audio>, que no puede ejecutar código. 'self': la música de la galaxia (también
+      // en tu computadora, que es http).
+      + "media-src 'self' https:",
   });
   next();
 });
@@ -1004,6 +1006,112 @@ app.post('/api/cartas/:id/abrir', async (req, res) => {
     await avisarA(carta.de, `${NOMBRES[req.yo]} abrió tu cartita 🥹`, `«Ábrela cuando ${carta.cuando === 'fecha' ? `llegue el ${F.fechaCorta(carta.fecha)}` : cuando.texto}»`, { tag: 'carta' });
   }
   return res.json({ ok: true, carta: verCarta(await base.carta(carta.id), req.yo) });
+});
+
+// ---------------------------------------------------------------- la galaxia secreta
+// (lib/galaxia.js). Es de los dos, pero está pensada para quien diga config.galaxia.para.
+const sinFoto = ({ foto, ...r }) => ({ ...r, foto: foto ? r.creado : null }); // `foto` = versión, para la caché
+
+app.get('/api/galaxia', async (req, res) => {
+  const otra = parejaDe(req.yo);
+  const [recuerdos, frases, estrellas, datos] = await Promise.all([
+    base.recuerdos(), base.frases(), base.estrellas(req.yo), base.datosGalaxia(req.yo),
+  ]);
+  const deHoy = estrellas.find((e) => e.fecha === req.hoy) || null;
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    hoy: req.hoy,
+    paraMi: config.galaxia.para === req.yo,
+    duena: config.galaxia.para,
+    estrella: { atrapada: Boolean(deHoy), sticker: deHoy ? deHoy.sticker : null },
+    stickers: estrellas.filter((e) => e.sticker > 0).map((e) => ({ n: e.sticker, fecha: e.fecha })),
+    totalStickers: GALAXIA.TOTAL_STICKERS,
+    estrellasAtrapadas: estrellas.length,
+    recuerdos: recuerdos.map(sinFoto),
+    // Las frases que me escribió mi pareja (para el frasco) y las que yo le escribí.
+    frases: {
+      paraMi: frases.filter((f) => f.para === req.yo).map(({ id, de, texto, creado }) => ({ id, de, texto, creado })),
+      mias: frases.filter((f) => f.de === req.yo && f.para === otra).map(({ id, texto, creado }) => ({ id, texto, creado })),
+    },
+    datos,
+    largos: GALAXIA.LARGO,
+  });
+});
+
+// Atrapar la estrella del día: pega el siguiente sticker del álbum (uno por día).
+app.post('/api/galaxia/estrella', async (req, res) => {
+  const estrellas = await base.estrellas(req.yo);
+  const deHoy = estrellas.find((e) => e.fecha === req.hoy);
+  if (deHoy) return res.status(409).json({ error: 'ya_atrapada', sticker: deHoy.sticker });
+  const pegados = estrellas.filter((e) => e.sticker > 0).length;
+  const sticker = pegados < GALAXIA.TOTAL_STICKERS ? pegados + 1 : 0; // 0: el álbum ya está lleno
+  if (!(await base.atraparEstrella({ fecha: req.hoy, quien: req.yo, sticker }))) {
+    const otra = (await base.estrellas(req.yo)).find((e) => e.fecha === req.hoy);
+    return res.status(409).json({ error: 'ya_atrapada', sticker: otra ? otra.sticker : null });
+  }
+  return res.json({ ok: true, sticker, completo: sticker === GALAXIA.TOTAL_STICKERS || sticker === 0, total: GALAXIA.TOTAL_STICKERS });
+});
+
+// ¿Ya encontró la galaxia? (para no arruinar la sorpresa con un aviso)
+const descubrio = async (quien) => Boolean((await base.datosGalaxia(quien)).intro);
+
+app.post('/api/galaxia/recuerdos', async (req, res) => {
+  const titulo = leerTexto(req.body?.titulo, GALAXIA.LARGO.titulo);
+  if (!titulo) return res.status(400).json({ error: 'titulo_invalido' });
+  const texto = req.body?.texto ? leerTexto(req.body.texto, GALAXIA.LARGO.texto, { lineas: true }) : '';
+  if (texto === undefined) return res.status(400).json({ error: 'texto_invalido' });
+  const fecha = req.body?.fecha || null;
+  if (fecha && (!F.esFecha(fecha) || fecha > req.hoy)) return res.status(400).json({ error: 'fecha_invalida' });
+  let fotos = null;
+  if (req.body?.foto) {
+    const buffer = leerDataUrl(req.body.foto);
+    fotos = buffer && await comprimirFoto(buffer);
+    if (!fotos) return res.status(400).json({ error: 'foto_invalida' });
+  }
+  const id = await base.crearRecuerdo({ quien: req.yo, titulo, texto, fecha, foto: fotos?.foto, mini: fotos?.mini });
+  const otra = parejaDe(req.yo);
+  if (await descubrio(otra)) {
+    await avisarA(otra, `${NOMBRES[req.yo]} guardó un recuerdo nuevo entre las estrellas 🌌`, `«${titulo}»`, { tag: 'galaxia' });
+  }
+  const recuerdo = (await base.recuerdos()).find((r) => r.id === id);
+  return res.json({ ok: true, recuerdo: sinFoto(recuerdo) });
+});
+
+app.delete('/api/galaxia/recuerdos/:id', async (req, res) => {
+  if (!(await base.borrarRecuerdo(Number(req.params.id), req.yo))) return res.status(404).json({ error: 'no_existe' });
+  return res.json({ ok: true });
+});
+
+app.get('/api/galaxia/recuerdos/:id/foto', async (req, res) => {
+  const datos = await base.fotoRecuerdo(Number(req.params.id), Boolean(req.query.mini));
+  if (!datos) return res.status(404).end();
+  res.set({ 'Content-Type': 'image/webp', 'Cache-Control': 'private, max-age=31536000, immutable' });
+  return res.send(datos);
+});
+
+// Una frase para el frasco de mi pareja.
+app.post('/api/galaxia/frases', async (req, res) => {
+  const texto = leerTexto(req.body?.texto, GALAXIA.LARGO.frase, { lineas: true });
+  if (!texto) return res.status(400).json({ error: 'texto_invalido' });
+  const otra = parejaDe(req.yo);
+  const id = await base.crearFrase({ de: req.yo, para: otra, texto });
+  if (await descubrio(otra)) {
+    await avisarA(otra, `${NOMBRES[req.yo]} metió una estrellita nueva en tu frasco 💫`, 'Ábrelo en tu rincón de las estrellas.', { tag: 'galaxia' });
+  }
+  return res.json({ ok: true, frase: { id, texto } });
+});
+
+app.delete('/api/galaxia/frases/:id', async (req, res) => {
+  if (!(await base.borrarFrase(Number(req.params.id), req.yo))) return res.status(404).json({ error: 'no_existe' });
+  return res.json({ ok: true });
+});
+
+// Lo que se recuerda de la galaxia: { clave, valor } (ver lib/galaxia.js).
+app.post('/api/galaxia/dato', async (req, res) => {
+  const { clave, valor } = req.body || {};
+  if (!GALAXIA.datoValido(clave, valor)) return res.status(400).json({ error: 'dato_invalido' });
+  await base.guardarDatoGalaxia(req.yo, clave, valor);
+  return res.json({ ok: true });
 });
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'no_existe' }));

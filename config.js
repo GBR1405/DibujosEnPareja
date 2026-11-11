@@ -61,6 +61,12 @@ module.exports = {
   // public/js/novedades.js.
   novedades: { id: '2026-11', para: ['dos'], de: 'uno' },
 
+  // La galaxia secreta (se entra bajando hasta el final de Hoy y jalando hacia arriba hasta que se
+  // rompe). Es de los dos, pero está hecha para la cuenta de `para`: a esa le habla como
+  // dueña ("este rincón es tuyo"). La música, el sonido de la ruptura y los stickers van
+  // en public/galaxia/ (mira el README).
+  galaxia: { para: 'dos' },
+
   // Al empezar un año nuevo se borran todos los dibujos del año anterior.
   // Ponlo en false si prefieren que se queden guardados en la base de datos.
   borrarAlEmpezarAnio: true,
